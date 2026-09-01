@@ -30,6 +30,8 @@ TOU_COLUMNS = [
     "End time",
     "Classification",
 ]
+MODEL_STATE_PREFIX = "model."
+MODEL_WIDGET_PREFIX = "_model."
 
 
 @st.cache_data(show_spinner="Loading energy history…")
@@ -102,51 +104,138 @@ def _nonblank_tou_rows(edited_rules: pd.DataFrame) -> list[dict[str, str]]:
     return rows
 
 
+def _model_state_key(name: str) -> str:
+    return f"{MODEL_STATE_PREFIX}{name}"
+
+
+def _model_widget_key(name: str) -> str:
+    return f"{MODEL_WIDGET_PREFIX}{name}"
+
+
+def _model_value(name: str, default: object) -> object:
+    state_key = _model_state_key(name)
+    if state_key not in st.session_state:
+        st.session_state[state_key] = default
+    return st.session_state[state_key]
+
+
+def _store_model_value(name: str) -> None:
+    st.session_state[_model_state_key(name)] = st.session_state[
+        _model_widget_key(name)
+    ]
+
+
 def render_model(hourly: pd.DataFrame) -> None:
     min_date, max_date = _date_bounds(hourly)
     default_start = max_date - timedelta(days=6)
     start_date = st.sidebar.date_input(
-        "Start date", value=default_start, min_value=min_date, max_value=max_date
+        "Start date",
+        value=_model_value("start_date", default_start),
+        min_value=min_date,
+        max_value=max_date,
+        key=_model_widget_key("start_date"),
+        on_change=_store_model_value,
+        args=("start_date",),
     )
     duration = st.sidebar.number_input(
-        "Duration (days)", min_value=1, max_value=7, value=7, step=1
+        "Duration (days)",
+        min_value=1,
+        max_value=7,
+        value=_model_value("duration", 7),
+        step=1,
+        key=_model_widget_key("duration"),
+        on_change=_store_model_value,
+        args=("duration",),
     )
     solar_scale = st.sidebar.number_input(
-        "Solar scale", min_value=0.0, value=1.0, step=0.1
+        "Solar scale",
+        min_value=0.0,
+        value=_model_value("solar_scale", 1.0),
+        step=0.1,
+        key=_model_widget_key("solar_scale"),
+        on_change=_store_model_value,
+        args=("solar_scale",),
     )
     st.sidebar.caption(f"Equivalent array: {BASE_SOLAR_KW * solar_scale:.2f} kW")
     strategy_label = st.sidebar.selectbox(
-        "Battery strategy", ["Self-consumption", "TOU reserve"]
+        "Battery strategy",
+        ["Self-consumption", "TOU reserve"],
+        index=["Self-consumption", "TOU reserve"].index(
+            _model_value("strategy", "Self-consumption")
+        ),
+        key=_model_widget_key("strategy"),
+        on_change=_store_model_value,
+        args=("strategy",),
     )
     capacity = st.sidebar.number_input(
-        "Battery usable capacity (kWh)", min_value=0.0, value=13.5, step=0.5
+        "Battery usable capacity (kWh)",
+        min_value=0.0,
+        value=_model_value("capacity", 13.5),
+        step=0.5,
+        key=_model_widget_key("capacity"),
+        on_change=_store_model_value,
+        args=("capacity",),
     )
     with st.sidebar.expander("Advanced battery settings"):
         starting_percent = st.number_input(
-            "Starting charge (%)", min_value=0.0, max_value=100.0, value=50.0, step=1.0
+            "Starting charge (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=_model_value("starting_percent", 50.0),
+            step=1.0,
+            key=_model_widget_key("starting_percent"),
+            on_change=_store_model_value,
+            args=("starting_percent",),
         )
         reserve_percent = st.number_input(
-            "Minimum reserve (%)", min_value=0.0, max_value=100.0, value=10.0, step=1.0
+            "Minimum reserve (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=_model_value("reserve_percent", 10.0),
+            step=1.0,
+            key=_model_widget_key("reserve_percent"),
+            on_change=_store_model_value,
+            args=("reserve_percent",),
         )
         round_trip_percent = st.number_input(
-            "Round-trip efficiency (%)", min_value=0.1, max_value=100.0, value=90.0, step=1.0
+            "Round-trip efficiency (%)",
+            min_value=0.1,
+            max_value=100.0,
+            value=_model_value("round_trip_percent", 90.0),
+            step=1.0,
+            key=_model_widget_key("round_trip_percent"),
+            on_change=_store_model_value,
+            args=("round_trip_percent",),
         )
         max_charge_kw = st.number_input(
-            "Maximum charge power (kW)", min_value=0.0, value=5.0, step=0.5
+            "Maximum charge power (kW)",
+            min_value=0.0,
+            value=_model_value("max_charge_kw", 5.0),
+            step=0.5,
+            key=_model_widget_key("max_charge_kw"),
+            on_change=_store_model_value,
+            args=("max_charge_kw",),
         )
         max_discharge_kw = st.number_input(
-            "Maximum discharge power (kW)", min_value=0.0, value=5.0, step=0.5
+            "Maximum discharge power (kW)",
+            min_value=0.0,
+            value=_model_value("max_discharge_kw", 5.0),
+            step=0.5,
+            key=_model_widget_key("max_discharge_kw"),
+            on_change=_store_model_value,
+            args=("max_discharge_kw",),
         )
 
     chart_slot = st.empty()
     st.subheader("Time-of-use rules")
     st.caption("Add your current schedule. Dates use MM-DD; weekdays use Mon,Tue,…")
     edited_rules = st.data_editor(
-        pd.DataFrame(columns=TOU_COLUMNS),
+        _model_value("tou_rules", pd.DataFrame(columns=TOU_COLUMNS)),
         num_rows="dynamic",
         use_container_width=True,
-        key="tou_rules",
+        key=_model_widget_key("tou_rules"),
     )
+    st.session_state[_model_state_key("tou_rules")] = edited_rules
     try:
         rules = parse_tou_rules(_nonblank_tou_rows(edited_rules))
     except TouValidationError as error:
