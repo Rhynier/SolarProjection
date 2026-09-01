@@ -32,6 +32,20 @@ TOU_COLUMNS = [
 ]
 MODEL_STATE_PREFIX = "model."
 MODEL_WIDGET_PREFIX = "_model."
+BATTERY_PRESETS = {
+    "Tesla Powerwall 3": {
+        "capacity_kwh": 13.5,
+        "round_trip_percent": 89.0,
+        "max_charge_kw": 5.0,
+        "max_discharge_kw": 11.5,
+    },
+    "Enphase IQ Battery 10C": {
+        "capacity_kwh": 10.0,
+        "round_trip_percent": 90.0,
+        "max_charge_kw": 7.08,
+        "max_discharge_kw": 7.08,
+    },
+}
 
 
 @st.cache_data(show_spinner="Loading energy history…")
@@ -125,6 +139,18 @@ def _store_model_value(name: str) -> None:
     ]
 
 
+def _readonly_preset_value(label: str, name: str, value: float) -> float:
+    widget_key = _model_widget_key(f"preset_{name}")
+    st.session_state[widget_key] = float(value)
+    return st.number_input(
+        label,
+        min_value=0.0,
+        step=0.01,
+        disabled=True,
+        key=widget_key,
+    )
+
+
 def render_model(hourly: pd.DataFrame) -> None:
     min_date, max_date = _date_bounds(hourly)
     default_start = max_date - timedelta(days=6)
@@ -167,15 +193,54 @@ def render_model(hourly: pd.DataFrame) -> None:
         on_change=_store_model_value,
         args=("strategy",),
     )
-    capacity = st.sidebar.number_input(
-        "Battery usable capacity (kWh)",
-        min_value=0.0,
-        value=_model_value("capacity", 13.5),
-        step=0.5,
-        key=_model_widget_key("capacity"),
+    battery_settings = st.sidebar.radio(
+        "Battery settings",
+        ["Custom values", "Battery preset"],
+        index=["Custom values", "Battery preset"].index(
+            _model_value("battery_settings", "Custom values")
+        ),
+        key=_model_widget_key("battery_settings"),
         on_change=_store_model_value,
-        args=("capacity",),
+        args=("battery_settings",),
     )
+    if battery_settings == "Custom values":
+        capacity = st.sidebar.number_input(
+            "Battery usable capacity (kWh)",
+            min_value=0.0,
+            value=_model_value("capacity", 13.5),
+            step=0.5,
+            key=_model_widget_key("capacity"),
+            on_change=_store_model_value,
+            args=("capacity",),
+        )
+        preset = None
+    else:
+        battery_model = st.sidebar.selectbox(
+            "Battery model",
+            list(BATTERY_PRESETS),
+            index=list(BATTERY_PRESETS).index(
+                _model_value("battery_model", "Tesla Powerwall 3")
+            ),
+            key=_model_widget_key("battery_model"),
+            on_change=_store_model_value,
+            args=("battery_model",),
+        )
+        battery_count = st.sidebar.number_input(
+            "Number of batteries",
+            min_value=1,
+            value=_model_value("battery_count", 1),
+            step=1,
+            key=_model_widget_key("battery_count"),
+            on_change=_store_model_value,
+            args=("battery_count",),
+        )
+        preset = BATTERY_PRESETS[battery_model]
+        with st.sidebar:
+            capacity = _readonly_preset_value(
+                "Battery usable capacity (kWh)",
+                "capacity",
+                round(preset["capacity_kwh"] * int(battery_count), 2),
+            )
     with st.sidebar.expander("Advanced battery settings"):
         starting_percent = st.number_input(
             "Starting charge (%)",
@@ -197,34 +262,51 @@ def render_model(hourly: pd.DataFrame) -> None:
             on_change=_store_model_value,
             args=("reserve_percent",),
         )
-        round_trip_percent = st.number_input(
-            "Round-trip efficiency (%)",
-            min_value=0.1,
-            max_value=100.0,
-            value=_model_value("round_trip_percent", 90.0),
-            step=1.0,
-            key=_model_widget_key("round_trip_percent"),
-            on_change=_store_model_value,
-            args=("round_trip_percent",),
-        )
-        max_charge_kw = st.number_input(
-            "Maximum charge power (kW)",
-            min_value=0.0,
-            value=_model_value("max_charge_kw", 5.0),
-            step=0.5,
-            key=_model_widget_key("max_charge_kw"),
-            on_change=_store_model_value,
-            args=("max_charge_kw",),
-        )
-        max_discharge_kw = st.number_input(
-            "Maximum discharge power (kW)",
-            min_value=0.0,
-            value=_model_value("max_discharge_kw", 5.0),
-            step=0.5,
-            key=_model_widget_key("max_discharge_kw"),
-            on_change=_store_model_value,
-            args=("max_discharge_kw",),
-        )
+        if preset is None:
+            round_trip_percent = st.number_input(
+                "Round-trip efficiency (%)",
+                min_value=0.1,
+                max_value=100.0,
+                value=_model_value("round_trip_percent", 90.0),
+                step=1.0,
+                key=_model_widget_key("round_trip_percent"),
+                on_change=_store_model_value,
+                args=("round_trip_percent",),
+            )
+            max_charge_kw = st.number_input(
+                "Maximum charge power (kW)",
+                min_value=0.0,
+                value=_model_value("max_charge_kw", 5.0),
+                step=0.5,
+                key=_model_widget_key("max_charge_kw"),
+                on_change=_store_model_value,
+                args=("max_charge_kw",),
+            )
+            max_discharge_kw = st.number_input(
+                "Maximum discharge power (kW)",
+                min_value=0.0,
+                value=_model_value("max_discharge_kw", 5.0),
+                step=0.5,
+                key=_model_widget_key("max_discharge_kw"),
+                on_change=_store_model_value,
+                args=("max_discharge_kw",),
+            )
+        else:
+            round_trip_percent = _readonly_preset_value(
+                "Round-trip efficiency (%)",
+                "round_trip_percent",
+                preset["round_trip_percent"],
+            )
+            max_charge_kw = _readonly_preset_value(
+                "Maximum charge power (kW)",
+                "max_charge_kw",
+                round(preset["max_charge_kw"] * int(battery_count), 2),
+            )
+            max_discharge_kw = _readonly_preset_value(
+                "Maximum discharge power (kW)",
+                "max_discharge_kw",
+                round(preset["max_discharge_kw"] * int(battery_count), 2),
+            )
 
     chart_slot = st.empty()
     st.subheader("Time-of-use rules")
