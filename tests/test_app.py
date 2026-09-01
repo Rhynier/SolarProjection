@@ -91,3 +91,30 @@ def test_battery_preset_selection_survives_a_history_round_trip():
     assert _selectbox(app, "Battery model").value == "Enphase IQ Battery 10C"
     assert _number_input(app, "Number of batteries").value == 2
     assert _number_input(app, "Battery usable capacity (kWh)").value == 20.0
+
+
+def test_custom_battery_values_survive_switching_to_a_preset_and_back():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    app.radio[0].set_value("System model").run()
+    custom_values = {
+        "Battery usable capacity (kWh)": 18.0,
+        "Round-trip efficiency (%)": 86.0,
+        "Maximum charge power (kW)": 4.5,
+        "Maximum discharge power (kW)": 8.5,
+    }
+    for label, value in custom_values.items():
+        _number_input(app, label).set_value(value).run()
+
+    _radio(app, "Battery settings").set_value("Battery preset").run()
+    _selectbox(app, "Battery model").set_value("Enphase IQ Battery 10C").run()
+    _number_input(app, "Number of batteries").set_value(2).run()
+    assert not _number_input(app, "Starting charge (%)").disabled
+    assert not _number_input(app, "Minimum reserve (%)").disabled
+
+    _radio(app, "Battery settings").set_value("Custom values").run()
+
+    for label, expected in custom_values.items():
+        widget = _number_input(app, label)
+        assert widget.value == expected
+        assert not widget.disabled
