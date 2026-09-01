@@ -35,12 +35,20 @@ def _numeric(series: pd.Series, label: str) -> pd.Series:
         raise DataValidationError(
             f"{label} contains invalid numbers at CSV rows {', '.join(rows)}"
         )
+    negative = values < 0
+    if negative.any():
+        rows = [str(index + 2) for index in values.index[negative][:5]]
+        raise DataValidationError(
+            f"{label} contains negative numbers at CSV rows {', '.join(rows)}"
+        )
     return values.astype(float)
 
 
 def _load_utility(path: Path) -> pd.DataFrame:
     utility = pd.read_csv(path)
     _require_columns(utility, UTILITY_COLUMNS, "utility")
+    if utility.empty:
+        raise DataValidationError("utility has no hourly rows")
 
     timestamps = pd.to_datetime(
         utility["DATE"] + " " + utility["START TIME"],
@@ -72,6 +80,8 @@ def _load_utility(path: Path) -> pd.DataFrame:
 def _load_solar(path: Path) -> pd.DataFrame:
     solar = pd.read_csv(path)
     _require_columns(solar, SOLAR_COLUMNS, "solar")
+    if solar.empty:
+        raise DataValidationError("solar has no hourly rows")
 
     absolute_timestamps = pd.to_datetime(
         solar["Date/Time"],
