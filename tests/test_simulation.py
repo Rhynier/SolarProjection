@@ -60,6 +60,29 @@ def test_solar_charging_honors_efficiency_capacity_and_exports_overflow():
     assert result.loc[0, "grid_export_kwh"] == pytest.approx(10.0 - 5.0 / 0.9)
 
 
+def test_non_unity_discharge_efficiency_reduces_soc_by_delivered_energy_per_leg_efficiency():
+    result = simulate(
+        frame([3.0], [0.0]),
+        SimulationConfig(1.0, battery(
+            reserve_percent=0.0, round_trip_efficiency=0.81,
+        ), "self_consumption"), [],
+    )
+    assert result.loc[0, "battery_discharge_output_kwh"] == pytest.approx(3.0)
+    assert result.loc[0, "battery_soc_kwh"] == pytest.approx(5.0 - 3.0 / 0.9)
+
+
+def test_charge_input_is_limited_by_max_charge_kw():
+    result = simulate(
+        frame([0.0], [10.0]),
+        SimulationConfig(1.0, battery(
+            capacity_kwh=20.0, starting_percent=0.0, reserve_percent=0.0,
+            max_charge_kw=2.0,
+        ), "self_consumption"), [],
+    )
+    assert result.loc[0, "battery_charge_input_kwh"] == pytest.approx(2.0)
+    assert result.loc[0, "grid_export_kwh"] == pytest.approx(8.0)
+
+
 def test_power_limit_and_reserve_bound_discharge():
     result = simulate(
         frame([8.0], [0.0]),
