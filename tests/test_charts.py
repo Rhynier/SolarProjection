@@ -3,6 +3,15 @@ import pandas as pd
 from solar_model.charts import SERIES_COLORS, build_history_figure, build_model_figure
 
 
+APPROVED_SERIES_COLORS = {
+    "Used": "#2563EB",
+    "Production": "#F59E0B",
+    "Battery": "#7C3AED",
+    "Grid import": "#DC2626",
+    "Grid export": "#059669",
+}
+
+
 def test_history_figure_has_requested_grouped_bars_and_colors():
     data = pd.DataFrame({
         "bucket_start": [pd.Timestamp("2026-01-01")],
@@ -12,10 +21,13 @@ def test_history_figure_has_requested_grouped_bars_and_colors():
     })
     original_data = data.copy(deep=True)
     figure = build_history_figure(data, ["Used", "Production", "Grid export"])
+    assert SERIES_COLORS == APPROVED_SERIES_COLORS
     assert [trace.name for trace in figure.data] == ["Used", "Production", "Grid export"]
     assert all(trace.type == "bar" for trace in figure.data)
     assert [trace.marker.color for trace in figure.data] == [
-        SERIES_COLORS["Used"], SERIES_COLORS["Production"], SERIES_COLORS["Grid export"]
+        APPROVED_SERIES_COLORS["Used"],
+        APPROVED_SERIES_COLORS["Production"],
+        APPROVED_SERIES_COLORS["Grid export"],
     ]
     assert [list(trace.y) for trace in figure.data] == [[10.0], [4.0], [1.0]]
     assert figure.layout.barmode == "group"
@@ -40,11 +52,11 @@ def test_model_figure_has_battery_axis_and_signed_grid_panel():
         "Used", "Production", "Battery", "Grid import", "Grid export"
     ]
     assert [trace.type for trace in figure.data] == ["bar", "bar", "scatter", "bar", "bar"]
-    assert figure.data[0].marker.color == SERIES_COLORS["Used"]
-    assert figure.data[1].marker.color == SERIES_COLORS["Production"]
-    assert figure.data[2].line.color == SERIES_COLORS["Battery"]
-    assert figure.data[3].marker.color == SERIES_COLORS["Grid import"]
-    assert figure.data[4].marker.color == SERIES_COLORS["Grid export"]
+    assert figure.data[0].marker.color == APPROVED_SERIES_COLORS["Used"]
+    assert figure.data[1].marker.color == APPROVED_SERIES_COLORS["Production"]
+    assert figure.data[2].line.color == APPROVED_SERIES_COLORS["Battery"]
+    assert figure.data[3].marker.color == APPROVED_SERIES_COLORS["Grid import"]
+    assert figure.data[4].marker.color == APPROVED_SERIES_COLORS["Grid export"]
     assert list(figure.data[3].y) == [0.0, 0.5]
     assert list(figure.data[4].y) == [-1.5, -0.0]
     assert figure.data[2].yaxis == "y2"
