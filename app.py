@@ -102,7 +102,7 @@ def render_history(hourly: pd.DataFrame) -> None:
     export.metric("Grid exported", f"{selected['grid_export_kwh'].sum():.2f} kWh")
     st.caption(f"Showing {resolved_bucket} energy totals.")
     st.plotly_chart(
-        build_history_figure(aggregated, visible_series), use_container_width=True
+        build_history_figure(aggregated, visible_series), width="stretch"
     )
 
 
@@ -314,7 +314,7 @@ def render_model(hourly: pd.DataFrame) -> None:
     edited_rules = st.data_editor(
         _model_value("tou_rules", pd.DataFrame(columns=TOU_COLUMNS)),
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         key=_model_widget_key("tou_rules"),
     )
     st.session_state[_model_state_key("tou_rules")] = edited_rules
@@ -361,7 +361,7 @@ def render_model(hourly: pd.DataFrame) -> None:
             f"{result.loc[result['is_expensive'], 'grid_import_kwh'].sum():.2f} kWh",
         )
         exported.metric("Grid export", f"{result['grid_export_kwh'].sum():.2f} kWh")
-        st.plotly_chart(build_model_figure(result), use_container_width=True)
+        st.plotly_chart(build_model_figure(result), width="stretch")
 
 
 st.set_page_config(page_title="Home Energy Model", page_icon="☀️", layout="wide")

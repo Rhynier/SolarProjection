@@ -25,6 +25,14 @@ def test_app_starts_against_supplied_csvs_without_exceptions():
     assert not app.exception
 
 
+def test_app_does_not_log_deprecated_container_width_warning(capfd):
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+    app.radio[0].set_value("System model").run()
+
+    captured = capfd.readouterr()
+    assert "Please replace `use_container_width` with `width`" not in captured.err
+
+
 def test_model_battery_capacity_survives_a_history_round_trip():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
 
