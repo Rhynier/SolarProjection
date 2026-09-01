@@ -10,13 +10,16 @@ def test_history_figure_has_requested_grouped_bars_and_colors():
         "actual_solar_kwh": [4.0],
         "grid_export_kwh": [1.0],
     })
+    original_data = data.copy(deep=True)
     figure = build_history_figure(data, ["Used", "Production", "Grid export"])
     assert [trace.name for trace in figure.data] == ["Used", "Production", "Grid export"]
     assert all(trace.type == "bar" for trace in figure.data)
     assert [trace.marker.color for trace in figure.data] == [
         SERIES_COLORS["Used"], SERIES_COLORS["Production"], SERIES_COLORS["Grid export"]
     ]
+    assert [list(trace.y) for trace in figure.data] == [[10.0], [4.0], [1.0]]
     assert figure.layout.barmode == "group"
+    pd.testing.assert_frame_equal(data, original_data)
 
 
 def test_model_figure_has_battery_axis_and_signed_grid_panel():
@@ -31,13 +34,25 @@ def test_model_figure_has_battery_axis_and_signed_grid_panel():
         "grid_export_kwh": [1.5, 0.0],
         "is_expensive": [False, True],
     })
+    original_result = result.copy(deep=True)
     figure = build_model_figure(result)
     assert [trace.name for trace in figure.data] == [
         "Used", "Production", "Battery", "Grid import", "Grid export"
     ]
+    assert [trace.type for trace in figure.data] == ["bar", "bar", "scatter", "bar", "bar"]
+    assert figure.data[0].marker.color == SERIES_COLORS["Used"]
+    assert figure.data[1].marker.color == SERIES_COLORS["Production"]
+    assert figure.data[2].line.color == SERIES_COLORS["Battery"]
+    assert figure.data[3].marker.color == SERIES_COLORS["Grid import"]
+    assert figure.data[4].marker.color == SERIES_COLORS["Grid export"]
     assert list(figure.data[3].y) == [0.0, 0.5]
     assert list(figure.data[4].y) == [-1.5, -0.0]
     assert figure.data[2].yaxis == "y2"
     assert figure.data[3].yaxis == "y3"
+    assert figure.layout.yaxis.title.text == "Hourly energy (kWh)"
     assert figure.layout.yaxis2.title.text == "Battery level (kWh)"
     assert figure.layout.yaxis3.title.text == "Grid exchange (kWh)"
+    assert figure.layout.showlegend is True
+    assert figure.layout.legend.itemclick != "none"
+    assert list(result["grid_export_kwh"]) == [1.5, 0.0]
+    pd.testing.assert_frame_equal(result, original_result)
