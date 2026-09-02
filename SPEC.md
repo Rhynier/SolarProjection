@@ -28,6 +28,7 @@ The application must:
 - Support both self-consumption and time-of-use reserve strategies.
 - Display modeled household use, production, battery state of charge, grid
   import, and grid export.
+- Display projected utility energy cost for the selected data in both views.
 - Keep source data and model settings local to the user's computer.
 
 ## 3. Non-goals
@@ -36,7 +37,8 @@ The prototype does not provide:
 
 - Production deployment, authentication, authorization, accounts, or a database.
 - Cloud storage, telemetry, or external service integrations.
-- Dollar-cost totals, bill calculations, payback analysis, or financial advice.
+- Detailed bill calculations, fixed charges, taxes, fees, payback analysis, or
+  financial advice.
 - Automatic solar or battery sizing recommendations.
 - Named, saved, or shareable modeling scenarios.
 - Future load, production, or weather forecasts.
@@ -44,7 +46,7 @@ The prototype does not provide:
 - Holiday-aware TOU scheduling.
 - A packaged Windows executable or installer.
 
-TOU prices classify hours for battery dispatch. They do not calculate a bill.
+Projected cost is an energy-only estimate, not a complete utility bill.
 
 ## 4. Runtime and Local Files
 
@@ -153,6 +155,8 @@ The code is divided by responsibility:
 - `solar_model/aggregation.py`: inclusive date filtering and energy aggregation.
 - `solar_model/tou.py`: TOU defaults, rule validation, price lookup, and rate
   classification.
+- `solar_model/costs.py`: projected utility cost calculation and currency
+  formatting.
 - `solar_model/simulation.py`: deterministic hourly solar and battery replay.
 - `solar_model/charts.py`: Plotly chart construction and stable styling.
 - `tests/`: unit, integration, real-data, and Streamlit smoke tests.
@@ -171,9 +175,11 @@ The sidebar provides:
 - An inclusive date range constrained to the shared dataset.
 - An aggregation selector: `Auto`, `Hour`, `Day`, `Week`, or `Month`.
 - A multi-select for `Used`, `Production`, and `Grid export`.
+- Utility purchase rate for exported energy, defaulting to `$0.0563/kWh`.
 
-The defaults are the full shared date range, `Auto`, and all three series.
-Exactly two dates and at least one series are required.
+The defaults are the full shared date range, `Auto`, all three series, and the
+export purchase rate above. Exactly two dates and at least one series are
+required. The export rate is finite and nonnegative.
 
 ### 8.2 Automatic aggregation
 
@@ -195,6 +201,7 @@ The page shows:
 - Total household use.
 - Total solar production.
 - Total grid export.
+- Projected cost for the selected hourly data.
 - The resolved aggregation bucket.
 - A grouped bar chart containing the selected series.
 
@@ -210,6 +217,7 @@ The sidebar provides:
 - Start date, constrained to the shared dataset.
 - Duration from 1 to 7 days.
 - Solar scale, which must be nonnegative.
+- Utility purchase rate for exported energy, defaulting to `$0.0960/kWh`.
 - Equivalent nominal array size:
 
 ```text
@@ -269,9 +277,9 @@ Starting state of charge must not be below the reserve.
 ### 9.5 Session behavior
 
 Model dates, duration, solar scale, strategy, battery mode, battery model,
-battery quantity, custom battery values, common battery values, and TOU edits
-must survive navigation between the two pages during the current Streamlit
-session.
+battery quantity, custom battery values, common battery values, TOU edits, and
+the independent Historical and System-model export purchase rates must survive
+navigation between the two pages during the current Streamlit session.
 
 All session settings reset when the application process restarts. No settings
 are written to disk.
@@ -337,7 +345,34 @@ Classification is derived from configured prices; it is not manually entered.
 TOU reserve requires at least one recurring date on which the configured rules
 contain more than one distinct price.
 
-## 11. Hourly Simulation
+## 11. Projected Utility Cost
+
+Both views calculate an energy-only Projected cost over the hourly data in the
+current view:
+
+```text
+projected_cost =
+    sum(grid_import_kwh * applicable_import_price_per_kwh)
+    - sum(grid_export_kwh * export_purchase_rate_per_kwh)
+```
+
+Historical View uses the filtered normalized hourly data and the preloaded SMUD
+schedule for import prices. System model uses its simulated hourly grid import
+and export and the currently edited TOU rules.
+
+Each view has its own persisted export purchase rate. Historical defaults to
+`$0.0563/kWh`; System model defaults to `$0.0960/kWh`. These settings are finite
+and nonnegative.
+
+An hour with imported energy must have a matching import price. An unmatched
+hour with no imported energy contributes only any export credit. If export
+credit exceeds import charges, Projected cost is negative and displays as a net
+credit such as `-$1.25`.
+
+The projection excludes the source CSV's `COST` value, fixed charges, minimum
+charges, taxes, fees, and other utility bill adjustments.
+
+## 12. Hourly Simulation
 
 For each selected historical hour, the simulation:
 
@@ -351,7 +386,7 @@ For each selected historical hour, the simulation:
 
 The battery never charges from grid import.
 
-### 11.1 Efficiency
+### 12.1 Efficiency
 
 Round-trip efficiency must be greater than zero and no greater than one when
 represented as a fraction. The simulation uses symmetric per-leg efficiency:
@@ -360,7 +395,7 @@ represented as a fraction. The simulation uses symmetric per-leg efficiency:
 leg_efficiency = sqrt(round_trip_efficiency)
 ```
 
-### 11.2 Charge behavior
+### 12.2 Charge behavior
 
 Charge and discharge limits are AC-side kW limits. Each simulation interval is
 one hour, so the numeric kW limit is also the maximum AC-side kWh transfer for
@@ -378,7 +413,7 @@ stored_energy_added_kwh = charge_input_kwh * leg_efficiency
 
 Any surplus beyond the accepted charge becomes grid export.
 
-### 11.3 Discharge behavior
+### 12.3 Discharge behavior
 
 ```text
 deliverable_from_battery_kwh = min(
@@ -393,7 +428,7 @@ stored_energy_removed_kwh = deliverable_from_battery_kwh / leg_efficiency
 State of charge remains between reserve and usable capacity, allowing only
 small floating-point tolerance at a boundary.
 
-### 11.4 Strategy behavior
+### 12.4 Strategy behavior
 
 **Self-consumption** permits discharge for every load deficit while stored
 energy remains above reserve.
@@ -404,7 +439,7 @@ deficit and battery energy is preserved.
 
 Both strategies always permit direct solar use and solar-only charging.
 
-### 11.5 Hourly energy balance
+### 12.5 Hourly energy balance
 
 Every hour must satisfy this AC-bus equation within `1e-9` kWh absolute
 tolerance:
@@ -420,7 +455,7 @@ modeled_solar
 
 Battery state changes separately account for efficiency loss.
 
-### 11.6 Simulation output
+### 12.6 Simulation output
 
 Each result row contains:
 
@@ -434,13 +469,14 @@ Each result row contains:
 - Grid export.
 - Whether the hour is Expensive.
 
-## 12. Modeled Results and Charts
+## 13. Modeled Results and Charts
 
 The modeled page shows summary values for:
 
 - Total grid import.
 - Grid import during Expensive hours.
 - Total grid export.
+- Projected cost for the modeled hourly grid exchange.
 
 The Plotly figure has two vertically aligned panels sharing an hourly time axis:
 
@@ -463,7 +499,7 @@ The application uses a wide page layout. Scalar controls live in the sidebar;
 the wider TOU table lives in the main content area. Streamlit's responsive
 layout handles narrower windows.
 
-## 13. Validation and Error Handling
+## 14. Validation and Error Handling
 
 Source data validation rejects:
 
@@ -489,11 +525,14 @@ Model validation rejects:
 - Unknown strategy values.
 - TOU reserve without a seasonal price spread.
 - Invalid TOU names, dates, weekdays, times, or prices.
+- Negative or non-finite export purchase rates.
+- Imported energy without a matching utility price when calculating Projected
+  cost.
 
 Errors appear in the page with concise context. Invalid model inputs prevent the
 model run but do not make valid historical data unavailable.
 
-## 14. Verification Requirements
+## 15. Verification Requirements
 
 Automated tests cover:
 
@@ -505,6 +544,8 @@ Automated tests cover:
 - TOU price parsing, seasonal ranking, overlap precedence, all-day rules,
   overnight rules, and year-wrapping seasons.
 - Default SMUD rates.
+- Projected-cost arithmetic, export credit, missing import prices, invalid
+  export rates, and net-credit formatting.
 - Self-consumption and TOU-reserve dispatch.
 - Battery starting charge, reserve, capacity, efficiency, and power limits.
 - Solar-only charging, grid import/export, battery bounds, and hourly energy
@@ -514,6 +555,7 @@ Automated tests cover:
 - Streamlit startup, page navigation, session persistence, battery presets,
   custom-value restoration, TOU defaults, and absence of known deprecation
   warnings.
+- Per-view export purchase defaults, persistence, and Projected cost response.
 
 The complete suite runs with:
 
@@ -523,13 +565,15 @@ python -m pytest -v
 
 Feature changes must update or add focused tests for changed behavior.
 
-## 15. Acceptance Criteria
+## 16. Acceptance Criteria
 
 The application is conformant when:
 
 - It launches locally and reads the two fixed CSV files without modifying them.
 - Historical filtering, aggregation, series selection, totals, and charts follow
   this specification.
+- Both views calculate Projected cost over their selected hourly data using the
+  specified import prices and independent export purchase rates.
 - Any valid one-to-seven-day period can be replayed with configurable solar,
   battery, strategy, and TOU inputs.
 - Custom and preset battery settings produce the specified effective battery
@@ -544,7 +588,7 @@ The application is conformant when:
 - The automated test suite passes against the current implementation and the
   supplied local data.
 
-## 16. Specification Maintenance
+## 17. Specification Maintenance
 
 This file is the source of truth for externally observable application behavior.
 Any feature change or behavior change must update `SPEC.md` in the same change.

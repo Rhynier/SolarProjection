@@ -2,8 +2,8 @@
 
 This is a local Streamlit prototype for exploring historical household energy
 use and replaying it with different solar and battery assumptions. It is not a
-production service: it has no accounts, database, cost calculation, forecast,
-or scenario persistence.
+production service: it has no accounts, database, forecast, or scenario
+persistence.
 
 ## Run locally
 
@@ -42,6 +42,12 @@ round-trip efficiency. The TOU editor starts with SMUD's published 2026 rates,
 without holiday exceptions. TOU reserve derives Cheap, Less Expensive, and
 Expensive tiers from each season's configured prices and discharges only at the
 seasonal maximum.
+
+Both views show a Projected cost calculated as hourly grid imports at the
+configured SMUD rate minus grid exports at the configured utility purchase
+rate. The Historical view defaults that export rate to $0.0563/kWh; the System
+model defaults it to $0.0960/kWh. The projection excludes fixed charges, taxes,
+fees, and other bill adjustments.
 
 The CSVs and Streamlit session settings remain local and uncommitted. Restart
 the app after replacing either CSV export.

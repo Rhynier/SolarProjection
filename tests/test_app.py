@@ -16,6 +16,21 @@ def _selectbox(app: AppTest, label: str):
     return next(widget for widget in app.selectbox if widget.label == label)
 
 
+def _metric(app: AppTest, label: str):
+    return next(metric for metric in app.metric if metric.label == label)
+
+
+def _currency_value(value: str) -> float:
+    normalized = value.replace(",", "")
+    if normalized.startswith("-$"):
+        return -float(normalized[2:])
+    return float(normalized.removeprefix("$"))
+
+
+def _energy_value(value: str) -> float:
+    return float(value.removesuffix(" kWh").replace(",", ""))
+
+
 def test_app_starts_against_supplied_csvs_without_exceptions():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
     assert not app.exception
@@ -151,3 +166,62 @@ def test_smud_prices_are_preloaded_in_the_time_of_use_editor():
         0.2139,
         0.3765,
     ]
+
+
+def test_each_view_has_a_persisted_export_purchase_rate_default():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    history_rate = _number_input(
+        app, "Utility purchase rate for exported energy ($/kWh)"
+    )
+    assert history_rate.value == pytest.approx(0.0563)
+    history_rate.set_value(0.07).run()
+
+    app.radio[0].set_value("System model").run()
+    model_rate = _number_input(
+        app, "Utility purchase rate for exported energy ($/kWh)"
+    )
+    assert model_rate.value == pytest.approx(0.096)
+    model_rate.set_value(0.11).run()
+
+    app.radio[0].set_value("Historical view").run()
+    assert _number_input(
+        app, "Utility purchase rate for exported energy ($/kWh)"
+    ).value == pytest.approx(0.07)
+
+    app.radio[0].set_value("System model").run()
+    assert _number_input(
+        app, "Utility purchase rate for exported energy ($/kWh)"
+    ).value == pytest.approx(0.11)
+
+
+def test_historical_projected_cost_uses_the_configured_export_purchase_rate():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    initial_cost = _currency_value(_metric(app, "Projected cost").value)
+    exported_kwh = _energy_value(_metric(app, "Grid exported").value)
+    _number_input(
+        app, "Utility purchase rate for exported energy ($/kWh)"
+    ).set_value(0.1563).run()
+    updated_cost = _currency_value(_metric(app, "Projected cost").value)
+
+    assert initial_cost - updated_cost == pytest.approx(
+        exported_kwh * 0.10, abs=0.02
+    )
+
+
+def test_system_model_projected_cost_uses_the_configured_export_purchase_rate():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    app.radio[0].set_value("System model").run()
+    _number_input(app, "Solar scale").set_value(100.0).run()
+    initial_cost = _currency_value(_metric(app, "Projected cost").value)
+    exported_kwh = _energy_value(_metric(app, "Grid export").value)
+    _number_input(
+        app, "Utility purchase rate for exported energy ($/kWh)"
+    ).set_value(0.196).run()
+    updated_cost = _currency_value(_metric(app, "Projected cost").value)
+
+    assert initial_cost - updated_cost == pytest.approx(
+        exported_kwh * 0.10, abs=0.02
+    )

@@ -14,12 +14,13 @@ Build a local, personal-use prototype for exploring historical household energy 
 - Replay one to seven historical days at hourly resolution with scaled solar production and a configurable battery.
 - Compare self-consumption and time-of-use battery strategies.
 - Show modeled household use, solar production, battery level, grid import, and grid export.
+- Project utility energy cost from hourly import prices and a configurable export purchase rate.
 - Keep the application local, small, and easy to change.
 
 ## Non-goals
 
 - Production deployment, authentication, accounts, or a database.
-- Dollar-cost or payback calculations.
+- Detailed billing, fixed charges, taxes, fees, or payback calculations.
 - Automatic system-size optimization.
 - Named or persisted modeling scenarios.
 - Future weather or load forecasting.
@@ -55,7 +56,7 @@ The utility file contains one local-clock row per represented hour:
 - `COST`
 - `NOTES`
 
-The model uses import and export. Cost and notes are preserved as source context but are not used in calculations.
+The model uses import and export. The source Cost and Notes fields are required for source compatibility but are not used; Projected cost is calculated from configured rates.
 
 ### Solar data
 
@@ -89,6 +90,7 @@ The code will stay divided into small modules with explicit responsibilities:
 - `solar_model/aggregation.py`: historical date filtering and bucket aggregation.
 - `solar_model/tou.py`: time-of-use rule validation and hour classification.
 - `solar_model/simulation.py`: deterministic hourly solar-and-battery replay.
+- `solar_model/costs.py`: shared projected utility cost calculation and currency formatting.
 - `solar_model/charts.py`: Plotly figure construction and stable series styling.
 - `tests/`: focused calculation and real-data smoke tests.
 
@@ -101,7 +103,8 @@ The Historical view provides:
 - A date-range selector constrained to the shared dataset.
 - A bucket selector with `Auto`, `Hour`, `Day`, `Week`, and `Month`.
 - Series selection for Used, Produced, and Exported.
-- A grouped bar chart and totals for the selected period.
+- Utility purchase rate for exported energy, defaulting to $0.0563/kWh.
+- A grouped bar chart, energy totals, and Projected cost for the selected period.
 
 Auto bucketing uses:
 
@@ -121,6 +124,7 @@ The System model replays a selected historical period of one through seven days 
 - Start date.
 - Duration from 1 to 7 days.
 - Solar production scaling factor.
+- Utility purchase rate for exported energy, defaulting to $0.0960/kWh.
 - Equivalent nominal array size, calculated from the existing 1.29 kW system.
 - Battery usable capacity in kWh.
 - Starting state of charge as a percentage.
@@ -145,6 +149,8 @@ Battery and TOU changes remain in the current Streamlit session and reset to def
 - Round-trip efficiency: 90 percent.
 - Maximum charge and discharge power: 5 kW each.
 - TOU rules: SMUD's published 2026 Time-of-Day schedule and prices, ignoring holiday exceptions.
+- Historical export purchase rate: $0.0563/kWh.
+- System-model export purchase rate: $0.0960/kWh.
 
 TOU reserve requires at least one season with multiple prices. This avoids presenting a model that silently preserves the battery for a schedule with no seasonal maximum above its minimum.
 
@@ -161,6 +167,17 @@ Each editable rule has:
 Effective date endpoints are inclusive. Time intervals are start-inclusive and end-exclusive. Equal start and end times represent a full day. Overnight time ranges and date ranges that wrap across the end of the year are supported. For an overnight rule, the applicable weekday is the day on which the interval starts.
 
 If multiple valid rules match, the highest price wins. Within each season, the minimum price is Cheap, the maximum price is Expensive, and any intermediate price is Less Expensive. Hours without a matching rule have no price and are not Expensive.
+
+### Projected utility cost
+
+Both views calculate Projected cost over their selected hourly data:
+
+```text
+sum(grid_import_kwh * hourly_import_price)
+  - sum(grid_export_kwh * export_purchase_rate)
+```
+
+Historical import uses the preloaded SMUD schedule. System-model import uses the editable time-of-use rules and modeled grid exchange. A negative result is displayed as a net credit. Imported energy without a matching utility price is a validation error.
 
 ## Hourly Simulation
 
@@ -254,6 +271,7 @@ Summary values show:
 - Total grid import.
 - Grid import during Expensive hours.
 - Total grid export.
+- Projected cost.
 
 Scalar and strategy controls remain in a left sidebar on wider screens and stack above results at narrow widths. Because it needs more horizontal space, the TOU rule editor sits beneath the charts in the main content area.
 
@@ -298,6 +316,7 @@ Manual verification will launch Streamlit against the real files, exercise both 
 
 - The application launches locally and reads the two supplied CSVs without modification.
 - The Historical view filters dates, chooses logical buckets, toggles the three requested series, and reports correct summed values.
+- Both views show Projected cost using their configured export purchase rates and the applicable hourly import prices.
 - The model replays any valid one-to-seven-day period with configurable solar, battery, strategy, and TOU inputs.
 - The model chart displays use, production, battery level, grid import, and grid export with the approved color mapping and split-panel layout.
 - Both strategies obey reserve, efficiency, power, capacity, and solar-only charging rules.

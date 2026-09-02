@@ -26,6 +26,7 @@ request.
 - `solar_model/data.py`: source validation and normalized hourly data.
 - `solar_model/aggregation.py`: historical filtering and bucket aggregation.
 - `solar_model/tou.py`: TOU rules, prices, and rate classification.
+- `solar_model/costs.py`: projected utility cost calculation and formatting.
 - `solar_model/simulation.py`: deterministic hourly replay.
 - `solar_model/charts.py`: Plotly figures and stable series styling.
 - `tests/`: automated behavior and regression coverage.

@@ -6,6 +6,11 @@ import streamlit as st
 
 from solar_model.aggregation import aggregate_history
 from solar_model.charts import build_history_figure, build_model_figure
+from solar_model.costs import (
+    CostValidationError,
+    format_currency,
+    projected_utility_cost,
+)
 from solar_model.data import DataValidationError, load_hourly_energy
 from solar_model.simulation import (
     BatteryConfig,
@@ -82,6 +87,7 @@ def render_history(hourly: pd.DataFrame) -> None:
     visible_series = st.sidebar.multiselect(
         "Series", HISTORY_SERIES, default=HISTORY_SERIES
     )
+    export_rate = _export_purchase_rate_input("history_export_rate", 0.0563)
 
     if not isinstance(selected_dates, tuple) or len(selected_dates) != 2:
         st.error("Choose both a start and end date.")
@@ -100,10 +106,21 @@ def render_history(hourly: pd.DataFrame) -> None:
         return
 
     selected = _filtered_hourly(hourly, start_date, end_date)
-    use, production, export = st.columns(3)
+    try:
+        projected_cost = projected_utility_cost(
+            selected,
+            parse_tou_rules(SMUD_DEFAULT_TOU_ROWS),
+            export_rate_per_kwh=export_rate,
+        )
+    except CostValidationError as error:
+        st.error(f"Projected cost could not be calculated: {error}")
+        return
+
+    use, production, export, cost = st.columns(4)
     use.metric("Household use", f"{selected['household_load_kwh'].sum():.2f} kWh")
     production.metric("Solar produced", f"{selected['actual_solar_kwh'].sum():.2f} kWh")
     export.metric("Grid exported", f"{selected['grid_export_kwh'].sum():.2f} kWh")
+    cost.metric("Projected cost", format_currency(projected_cost))
     st.caption(f"Showing {resolved_bucket} energy totals.")
     st.plotly_chart(
         build_history_figure(aggregated, visible_series), width="stretch"
@@ -141,6 +158,19 @@ def _store_model_value(name: str) -> None:
     st.session_state[_model_state_key(name)] = st.session_state[
         _model_widget_key(name)
     ]
+
+
+def _export_purchase_rate_input(name: str, default: float) -> float:
+    return st.sidebar.number_input(
+        "Utility purchase rate for exported energy ($/kWh)",
+        min_value=0.0,
+        value=_model_value(name, default),
+        step=0.0001,
+        format="%.4f",
+        key=_model_widget_key(name),
+        on_change=_store_model_value,
+        args=(name,),
+    )
 
 
 def _readonly_preset_value(label: str, name: str, value: float) -> float:
@@ -186,6 +216,7 @@ def render_model(hourly: pd.DataFrame) -> None:
         on_change=_store_model_value,
         args=("solar_scale",),
     )
+    export_rate = _export_purchase_rate_input("system_export_rate", 0.096)
     st.sidebar.caption(f"Equivalent array: {BASE_SOLAR_KW * solar_scale:.2f} kW")
     strategy_label = st.sidebar.selectbox(
         "Battery strategy",
@@ -366,15 +397,23 @@ def render_model(hourly: pd.DataFrame) -> None:
     except SimulationValidationError as error:
         chart_slot.error(f"Model settings are invalid: {error}")
         return
+    try:
+        projected_cost = projected_utility_cost(
+            result, rules, export_rate_per_kwh=export_rate
+        )
+    except CostValidationError as error:
+        chart_slot.error(f"Projected cost could not be calculated: {error}")
+        return
 
     with chart_slot.container():
-        imported, expensive, exported = st.columns(3)
+        imported, expensive, exported, cost = st.columns(4)
         imported.metric("Grid import", f"{result['grid_import_kwh'].sum():.2f} kWh")
         expensive.metric(
             "Expensive import",
             f"{result.loc[result['is_expensive'], 'grid_import_kwh'].sum():.2f} kWh",
         )
         exported.metric("Grid export", f"{result['grid_export_kwh'].sum():.2f} kWh")
+        cost.metric("Projected cost", format_currency(projected_cost))
         st.plotly_chart(build_model_figure(result), width="stretch")
 
 
