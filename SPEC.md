@@ -361,11 +361,15 @@ three pages during the current Streamlit session.
 
 All settings listed above survive navigation between the application's pages
 during the current Streamlit session. The independent Historical and
-System-model export purchase rates, and every battery strategy, mode, preset,
-quantity, common, and custom setting, also persist across fresh sessions in
-the local user configuration. A new installation continues to use the listed
-defaults and does not create a configuration file until the user changes one
-of those persisted settings.
+System-model export purchase rates, every battery strategy, mode, preset,
+quantity, common, and custom setting, and the Solar production scaling mode
+with its independent Annual and Monthly values also persist across fresh
+sessions in the local user configuration. Valid Solar production edits are
+saved automatically; an invalid Monthly editor state remains local to the
+current session and does not replace the last valid saved Solar configuration
+or prevent a valid setting in another section from saving. A new installation
+continues to use the listed defaults and does not create a configuration file
+until the user changes one of those persisted settings.
 
 ## 10. Time-of-Use Rules
 

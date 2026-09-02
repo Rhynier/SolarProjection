@@ -82,8 +82,9 @@ def _plotly_values(trace) -> np.ndarray:
 def _edit_data_editor_rows(
     app: AppTest,
     edited_rows: dict[int, dict[str, object]],
+    editor_index: int = 0,
 ) -> AppTest:
-    editor = app.get("dataframe")[0]
+    editor = app.get("dataframe")[editor_index]
     widget_states = app._tree.get_widget_states()
     widget_states.widgets.append(
         WidgetState(
@@ -102,8 +103,14 @@ def _edit_data_editor_rows(
     return app._tree._runner._run(widget_states, timeout=30)
 
 
-def _edit_data_editor(app: AppTest, row: int, column: str, value: object) -> AppTest:
-    return _edit_data_editor_rows(app, {row: {column: value}})
+def _edit_data_editor(
+    app: AppTest,
+    row: int,
+    column: str,
+    value: object,
+    editor_index: int = 0,
+) -> AppTest:
+    return _edit_data_editor_rows(app, {row: {column: value}}, editor_index)
 
 
 def test_app_starts_against_supplied_csvs_without_exceptions(
@@ -900,6 +907,57 @@ def test_all_battery_settings_persist_across_fresh_sessions():
     assert _number_input(second, "Round-trip efficiency (%)").value == 86.0
     assert _number_input(second, "Maximum charge power (kW)").value == 4.5
     assert _number_input(second, "Maximum discharge power (kW)").value == 8.5
+
+
+def test_annual_solar_configuration_persists_across_fresh_sessions():
+    first = _new_app()
+    first.radio[0].set_value("Configuration").run()
+    _number_input(first, "Reference annual production (kWh)").set_value(1200.0).run()
+    _number_input(first, "Proposed annual production (kWh)").set_value(2400.0).run()
+
+    second = _new_app()
+    second.radio[0].set_value("Configuration").run()
+    assert _radio(second, "Production scaling").value == "Annual"
+    assert _number_input(second, "Reference annual production (kWh)").value == 1200.0
+    assert _number_input(second, "Proposed annual production (kWh)").value == 2400.0
+
+
+def test_monthly_solar_configuration_persists_across_fresh_sessions():
+    first = _new_app()
+    first.radio[0].set_value("Configuration").run()
+    _radio(first, "Production scaling").set_value("Monthly").run()
+    first = _edit_data_editor(
+        first, 0, "Proposed production (kWh)", 336.26, editor_index=0
+    )
+
+    second = _new_app()
+    second.radio[0].set_value("Configuration").run()
+    assert _radio(second, "Production scaling").value == "Monthly"
+    monthly = second.session_state["model.monthly_production"]
+    assert monthly.iloc[0]["Proposed production (kWh)"] == pytest.approx(336.26)
+
+
+def test_invalid_monthly_edit_keeps_saved_solar_but_other_section_can_save(
+    isolate_user_configuration,
+):
+    first = _new_app()
+    first.radio[0].set_value("Configuration").run()
+    _radio(first, "Production scaling").set_value("Monthly").run()
+    last_valid_solar = json.loads(
+        isolate_user_configuration.read_text(encoding="utf-8")
+    )["solar_production"]
+
+    first = _edit_data_editor(
+        first, 0, "Reference production (kWh)", None, editor_index=0
+    )
+    first.radio[0].set_value("Historical view").run()
+    _number_input(
+        first, "Utility purchase rate for exported energy ($/kWh)"
+    ).set_value(0.07).run()
+
+    saved = json.loads(isolate_user_configuration.read_text(encoding="utf-8"))
+    assert saved["historical"]["export_purchase_rate_per_kwh"] == pytest.approx(0.07)
+    assert saved["solar_production"] == last_valid_solar
 
 
 def test_historical_projected_cost_uses_the_configured_export_purchase_rate():

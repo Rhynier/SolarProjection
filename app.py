@@ -551,6 +551,15 @@ def _store_model_value(name: str, section: str | None = None) -> None:
     st.session_state[_model_state_key(name)] = st.session_state[
         _model_widget_key(name)
     ]
+    if (
+        section == "solar_production"
+        and name == "production_scaling"
+        and st.session_state[_model_state_key(name)] == "Monthly"
+    ):
+        _initialize_monthly_production_if_needed(
+            float(st.session_state[_model_state_key("reference_production_kwh")]),
+            float(st.session_state[_model_state_key("proposed_production_kwh")]),
+        )
     if section is not None:
         _persist_configuration_section(section)
 
@@ -637,23 +646,31 @@ def _validate_monthly_production(monthly: pd.DataFrame) -> None:
             )
 
 
+def _initialize_monthly_production_if_needed(
+    reference_annual_kwh: float,
+    proposed_annual_kwh: float,
+) -> pd.DataFrame:
+    state_key = _model_state_key("monthly_production")
+    initialized_key = _model_state_key("monthly_production_initialized")
+    if not st.session_state.get(initialized_key, False):
+        st.session_state[state_key] = _monthly_production_defaults(
+            reference_annual_kwh, proposed_annual_kwh
+        )
+        st.session_state[initialized_key] = True
+    return _model_value(
+        "monthly_production",
+        _monthly_production_defaults(reference_annual_kwh, proposed_annual_kwh),
+    )
+
+
 def _monthly_production_input(
     reference_annual_kwh: float,
     proposed_annual_kwh: float,
 ) -> tuple[float, float, tuple[float, ...]]:
     state_key = _model_state_key("monthly_production")
-    initialized_key = _model_state_key("monthly_production_initialized")
-    if not st.session_state.get(initialized_key, False):
-        monthly = _monthly_production_defaults(
-            reference_annual_kwh, proposed_annual_kwh
-        )
-        st.session_state[state_key] = monthly
-        st.session_state[initialized_key] = True
-    else:
-        monthly = _model_value(
-            "monthly_production",
-            _monthly_production_defaults(reference_annual_kwh, proposed_annual_kwh),
-        )
+    monthly = _initialize_monthly_production_if_needed(
+        reference_annual_kwh, proposed_annual_kwh
+    )
     display = monthly.copy()
     reference_values = pd.to_numeric(
         display[MONTHLY_REFERENCE_COLUMN], errors="coerce"
@@ -690,6 +707,12 @@ def _monthly_production_input(
     changed = not edited_monthly.equals(monthly)
     st.session_state[state_key] = edited_monthly
     if changed:
+        try:
+            _validate_monthly_production(edited_monthly)
+        except ValueError:
+            pass
+        else:
+            _persist_configuration_section("solar_production")
         st.rerun()
 
     _validate_monthly_production(edited_monthly)
@@ -717,7 +740,7 @@ def _render_production_scaling_configuration() -> None:
         horizontal=True,
         key=_model_widget_key("production_scaling"),
         on_change=_store_model_value,
-        args=("production_scaling",),
+        args=("production_scaling", "solar_production"),
     )
     annual_reference_kwh = float(_model_value("reference_production_kwh", 2017.56))
     annual_proposed_kwh = float(_model_value("proposed_production_kwh", 2017.56))
@@ -731,7 +754,7 @@ def _render_production_scaling_configuration() -> None:
             format="%.2f",
             key=_model_widget_key("reference_production_kwh"),
             on_change=_store_model_value,
-            args=("reference_production_kwh",),
+            args=("reference_production_kwh", "solar_production"),
         )
         proposed_production_kwh = st.number_input(
             "Proposed annual production (kWh)",
@@ -741,7 +764,7 @@ def _render_production_scaling_configuration() -> None:
             format="%.2f",
             key=_model_widget_key("proposed_production_kwh"),
             on_change=_store_model_value,
-            args=("proposed_production_kwh",),
+            args=("proposed_production_kwh", "solar_production"),
         )
     else:
         try:
