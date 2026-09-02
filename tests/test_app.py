@@ -10,6 +10,8 @@ import pytest
 from streamlit.proto.WidgetStates_pb2 import WidgetState
 from streamlit.testing.v1 import AppTest
 
+from solar_model.configuration import default_configuration, save_configuration
+
 
 @pytest.fixture(autouse=True)
 def isolate_user_configuration(monkeypatch, tmp_path):
@@ -385,6 +387,56 @@ def test_monthly_scaling_initializes_from_retained_annual_values():
     )
     assert not any(
         caption.value.startswith("Production scale:") for caption in app.caption
+    )
+
+
+def test_monthly_values_survive_an_annual_edit_after_monthly_initialization():
+    app = _new_app()
+    app.radio[0].set_value("Configuration").run()
+    _number_input(app, "Reference annual production (kWh)").set_value(1200.0).run()
+    _number_input(app, "Proposed annual production (kWh)").set_value(2400.0).run()
+    _radio(app, "Production scaling").set_value("Monthly").run()
+    app = _edit_data_editor(app, 0, "Proposed production (kWh)", 300.0)
+    monthly_before_annual_edit = app.session_state["model.monthly_production"].copy(
+        deep=True
+    )
+
+    _radio(app, "Production scaling").set_value("Annual").run()
+    _number_input(app, "Reference annual production (kWh)").set_value(1500.0).run()
+    _radio(app, "Production scaling").set_value("Monthly").run()
+
+    pd.testing.assert_frame_equal(
+        app.session_state["model.monthly_production"], monthly_before_annual_edit
+    )
+
+
+def test_loaded_custom_monthly_values_survive_an_annual_edit(
+    isolate_user_configuration,
+):
+    document = default_configuration()
+    document["solar_production"]["monthly"][0] = {
+        "month": "January",
+        "reference_kwh": 100.0,
+        "proposed_kwh": 200.0,
+    }
+    save_configuration(isolate_user_configuration, document)
+
+    app = _new_app()
+    app.radio[0].set_value("Configuration").run()
+    monthly_before_annual_edit = app.session_state["model.monthly_production"].copy(
+        deep=True
+    )
+    assert monthly_before_annual_edit.iloc[0].to_dict() == {
+        "Month": "January",
+        "Reference production (kWh)": 100.0,
+        "Proposed production (kWh)": 200.0,
+    }
+
+    _number_input(app, "Reference annual production (kWh)").set_value(1500.0).run()
+    _radio(app, "Production scaling").set_value("Monthly").run()
+
+    pd.testing.assert_frame_equal(
+        app.session_state["model.monthly_production"], monthly_before_annual_edit
     )
 
 

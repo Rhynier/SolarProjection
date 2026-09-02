@@ -388,7 +388,7 @@ def _apply_configuration(document: dict[str, object]) -> None:
     st.session_state[_model_state_key("proposed_production_kwh")] = solar_production[
         "annual"
     ]["proposed_kwh"]
-    st.session_state[_model_state_key("monthly_production")] = pd.DataFrame(
+    monthly_production = pd.DataFrame(
         [
             {
                 "Month": row["month"],
@@ -398,6 +398,16 @@ def _apply_configuration(document: dict[str, object]) -> None:
             for row in solar_production["monthly"]
         ],
         columns=["Month", MONTHLY_REFERENCE_COLUMN, MONTHLY_PROPOSED_COLUMN],
+    )
+    st.session_state[_model_state_key("monthly_production")] = monthly_production
+    st.session_state[_model_state_key("monthly_production_initialized")] = (
+        solar_production["scaling_mode"] == "Monthly"
+        or not monthly_production.equals(
+            _monthly_production_defaults(
+                float(solar_production["annual"]["reference_kwh"]),
+                float(solar_production["annual"]["proposed_kwh"]),
+            )
+        )
     )
     st.session_state[_shared_state_key("tou_rules")] = pd.DataFrame(
         [
@@ -545,16 +555,6 @@ def _store_model_value(name: str, section: str | None = None) -> None:
         _persist_configuration_section(section)
 
 
-def _store_annual_production_value(name: str) -> None:
-    _store_model_value(name)
-    st.session_state[_model_state_key("monthly_production")] = (
-        _monthly_production_defaults(
-            float(st.session_state[_model_state_key("reference_production_kwh")]),
-            float(st.session_state[_model_state_key("proposed_production_kwh")]),
-        )
-    )
-
-
 def _export_purchase_rate_input(name: str, default: float, section: str) -> float:
     return st.sidebar.number_input(
         "Utility purchase rate for exported energy ($/kWh)",
@@ -642,10 +642,18 @@ def _monthly_production_input(
     proposed_annual_kwh: float,
 ) -> tuple[float, float, tuple[float, ...]]:
     state_key = _model_state_key("monthly_production")
-    monthly = _model_value(
-        "monthly_production",
-        _monthly_production_defaults(reference_annual_kwh, proposed_annual_kwh),
-    )
+    initialized_key = _model_state_key("monthly_production_initialized")
+    if not st.session_state.get(initialized_key, False):
+        monthly = _monthly_production_defaults(
+            reference_annual_kwh, proposed_annual_kwh
+        )
+        st.session_state[state_key] = monthly
+        st.session_state[initialized_key] = True
+    else:
+        monthly = _model_value(
+            "monthly_production",
+            _monthly_production_defaults(reference_annual_kwh, proposed_annual_kwh),
+        )
     display = monthly.copy()
     reference_values = pd.to_numeric(
         display[MONTHLY_REFERENCE_COLUMN], errors="coerce"
@@ -722,7 +730,7 @@ def _render_production_scaling_configuration() -> None:
             step=0.01,
             format="%.2f",
             key=_model_widget_key("reference_production_kwh"),
-            on_change=_store_annual_production_value,
+            on_change=_store_model_value,
             args=("reference_production_kwh",),
         )
         proposed_production_kwh = st.number_input(
@@ -732,7 +740,7 @@ def _render_production_scaling_configuration() -> None:
             step=0.01,
             format="%.2f",
             key=_model_widget_key("proposed_production_kwh"),
-            on_change=_store_annual_production_value,
+            on_change=_store_model_value,
             args=("proposed_production_kwh",),
         )
     else:
