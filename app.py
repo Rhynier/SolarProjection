@@ -1032,8 +1032,6 @@ _initialize_configuration()
 st.title("Home Energy Model")
 if st.session_state[CONFIG_WARNING_KEY] is not None:
     st.warning(st.session_state[CONFIG_WARNING_KEY])
-if st.session_state[CONFIG_ERROR_KEY] is not None:
-    st.error(st.session_state[CONFIG_ERROR_KEY])
 
 try:
     hourly = load_data()
@@ -1053,3 +1051,6 @@ elif page == "System model":
     render_model(hourly)
 else:
     render_configuration()
+
+if st.session_state[CONFIG_ERROR_KEY] is not None:
+    st.error(st.session_state[CONFIG_ERROR_KEY])

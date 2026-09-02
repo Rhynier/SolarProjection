@@ -83,6 +83,7 @@ def _edit_data_editor_rows(
     app: AppTest,
     edited_rows: dict[int, dict[str, object]],
     editor_index: int = 0,
+    added_rows: list[dict[str, object]] | None = None,
 ) -> AppTest:
     editor = app.get("dataframe")[editor_index]
     widget_states = app._tree.get_widget_states()
@@ -94,7 +95,7 @@ def _edit_data_editor_rows(
                     "edited_rows": {
                         str(row): values for row, values in edited_rows.items()
                     },
-                    "added_rows": [],
+                    "added_rows": [] if added_rows is None else added_rows,
                     "deleted_rows": [],
                 }
             ),
@@ -875,6 +876,48 @@ def test_save_failure_is_visible_and_keeps_session_value(monkeypatch, tmp_path):
         app, "Utility purchase rate for exported energy ($/kWh)"
     ).value == pytest.approx(0.07)
     assert any("could not be saved" in item.value.lower() for item in app.error)
+
+
+def test_tou_save_failure_is_visible_on_the_edit_rerun(monkeypatch, tmp_path):
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("block", encoding="utf-8")
+    monkeypatch.setenv(
+        "HOME_ENERGY_MODEL_CONFIG_PATH", str(blocker / "config.json")
+    )
+    app = _new_app()
+    app.radio[0].set_value("Configuration").run()
+
+    app = _edit_data_editor(app, 0, "Price ($/kWh)", 0.20)
+
+    assert any("could not be saved" in item.value.lower() for item in app.error)
+
+
+def test_successful_tou_save_clears_an_already_rendered_save_error(
+    isolate_user_configuration,
+):
+    app = _new_app()
+    app.radio[0].set_value("Configuration").run()
+    app.session_state["_configuration.error"] = "Configuration could not be saved"
+    app.run()
+    assert any("could not be saved" in item.value.lower() for item in app.error)
+
+    app = _edit_data_editor(app, 0, "Price ($/kWh)", 0.20)
+
+    assert not any("could not be saved" in item.value.lower() for item in app.error)
+    saved = json.loads(isolate_user_configuration.read_text(encoding="utf-8"))
+    assert saved["time_of_use"]["rules"][0]["price_per_kwh"] == pytest.approx(0.20)
+
+
+def test_new_blank_tou_row_is_omitted_from_persisted_rules(
+    isolate_user_configuration,
+):
+    app = _new_app()
+    app.radio[0].set_value("Configuration").run()
+
+    _edit_data_editor_rows(app, {}, added_rows=[{}])
+
+    saved = json.loads(isolate_user_configuration.read_text(encoding="utf-8"))
+    assert saved["time_of_use"] == default_configuration()["time_of_use"]
 
 
 def test_transient_view_state_is_not_written(isolate_user_configuration):
