@@ -43,7 +43,7 @@ The prototype does not provide:
 - Automatic solar or battery sizing recommendations.
 - Named, saved, or shareable modeling scenarios.
 - Future load, production, or weather forecasts.
-- Grid charging, rate arbitrage, or battery export to the grid.
+- Grid charging, grid-energy arbitrage, or battery export to the grid.
 - Holiday-aware TOU scheduling.
 - A packaged Windows executable or installer.
 
@@ -164,7 +164,10 @@ The code is divided by responsibility:
   classification.
 - `solar_model/costs.py`: hourly and total projected utility cost calculation
   and currency formatting.
+- `solar_model/optimization.py`: continuous historical battery-dispatch cost
+  optimization.
 - `solar_model/simulation.py`: deterministic hourly solar and battery replay.
+- `solar_model/metrics.py`: strategy-comparison summary calculations.
 - `solar_model/charts.py`: Plotly chart construction and stable styling.
 - `tests/`: unit, integration, real-data, and Streamlit smoke tests.
 

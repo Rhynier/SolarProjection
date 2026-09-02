@@ -84,6 +84,25 @@ def test_cost_optimized_simulation_requires_an_export_rate():
         simulate(hourly, SimulationConfig(1.0, battery, "cost_optimized"), [])
 
 
+def test_cost_optimizer_rejects_imported_energy_without_a_utility_price():
+    hourly = _hourly([1.0], [0.0])
+
+    with pytest.raises(
+        SimulationValidationError,
+        match="Imported energy at 2026-07-06 16:00:00 has no utility price",
+    ):
+        simulate(
+            hourly,
+            SimulationConfig(
+                1.0,
+                _battery(starting_percent=0.0),
+                "cost_optimized",
+                export_rate_per_kwh=0.05,
+            ),
+            [],
+        )
+
+
 def test_optimizer_preserves_limited_energy_for_the_higher_price_hour():
     result = simulate(
         _hourly([1.0, 1.0], [0.0, 0.0]),
