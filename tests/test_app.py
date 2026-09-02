@@ -804,6 +804,94 @@ def test_time_of_use_editor_edits_persist_across_analytical_views():
     assert not app.exception
 
 
+def test_time_of_use_rules_persist_across_fresh_sessions():
+    first = _new_app()
+    first.radio[0].set_value("Configuration").run()
+    first = _edit_data_editor(first, 0, "Price ($/kWh)", 0.20, editor_index=0)
+
+    second = _new_app()
+    second.radio[0].set_value("Configuration").run()
+
+    rules = second.session_state["shared.tou_rules"]
+    assert rules.iloc[0]["Price ($/kWh)"] == pytest.approx(0.20)
+
+
+def test_invalid_tou_edit_keeps_saved_rules_but_rate_can_still_save(
+    isolate_user_configuration,
+):
+    first = _new_app()
+    first.radio[0].set_value("Configuration").run()
+    first = _edit_data_editor(first, 0, "Start date", "invalid", editor_index=0)
+    first.radio[0].set_value("Historical view").run()
+    _number_input(
+        first, "Utility purchase rate for exported energy ($/kWh)"
+    ).set_value(0.07).run()
+
+    saved = json.loads(isolate_user_configuration.read_text(encoding="utf-8"))
+    assert saved["historical"]["export_purchase_rate_per_kwh"] == pytest.approx(0.07)
+    assert saved["time_of_use"] == default_configuration()["time_of_use"]
+
+
+def test_configuration_page_shows_automatic_save_path(isolate_user_configuration):
+    app = _new_app()
+    app.radio[0].set_value("Configuration").run()
+
+    assert any(
+        "Settings save automatically" in item.value
+        and str(isolate_user_configuration) in item.value
+        for item in app.caption
+    )
+
+
+def test_invalid_existing_file_warns_and_is_not_overwritten(
+    isolate_user_configuration,
+):
+    isolate_user_configuration.parent.mkdir(parents=True)
+    original = json.dumps({"schema_version": 1, "unknown": True})
+    isolate_user_configuration.write_text(original, encoding="utf-8")
+
+    app = _new_app()
+    assert any(str(isolate_user_configuration) in item.value for item in app.warning)
+    _number_input(
+        app, "Utility purchase rate for exported energy ($/kWh)"
+    ).set_value(0.07).run()
+
+    assert isolate_user_configuration.read_text(encoding="utf-8") == original
+
+
+def test_save_failure_is_visible_and_keeps_session_value(monkeypatch, tmp_path):
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("block", encoding="utf-8")
+    monkeypatch.setenv(
+        "HOME_ENERGY_MODEL_CONFIG_PATH", str(blocker / "config.json")
+    )
+
+    app = _new_app()
+    app = _number_input(
+        app, "Utility purchase rate for exported energy ($/kWh)"
+    ).set_value(0.07).run()
+
+    assert _number_input(
+        app, "Utility purchase rate for exported energy ($/kWh)"
+    ).value == pytest.approx(0.07)
+    assert any("could not be saved" in item.value.lower() for item in app.error)
+
+
+def test_transient_view_state_is_not_written(isolate_user_configuration):
+    app = _new_app()
+    _selectbox(app, "Aggregation").set_value("Day").run()
+    app.multiselect[0].set_value(["Used"]).run()
+    _number_input(
+        app, "Utility purchase rate for exported energy ($/kWh)"
+    ).set_value(0.07).run()
+
+    serialized = isolate_user_configuration.read_text(encoding="utf-8")
+    assert "aggregation" not in serialized
+    assert "date_range" not in serialized
+    assert "visible_series" not in serialized
+    assert "Historical view" not in serialized
+
+
 def test_historical_cost_uses_the_shared_time_of_use_configuration():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
     app.session_state["shared.tou_rules"] = pd.DataFrame(

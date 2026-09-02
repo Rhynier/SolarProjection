@@ -2,8 +2,8 @@
 
 This is a local Streamlit prototype for exploring historical household energy
 use and replaying it with different solar and battery assumptions. It is not a
-production service: it has no accounts, database, forecast, or scenario
-persistence.
+production service: it has no accounts, database, forecast, named scenarios,
+or cloud persistence. It retains local user configuration.
 
 ## Run locally
 
@@ -20,6 +20,23 @@ Run the automated checks with:
 ```powershell
 python -m pytest -v
 ```
+
+## Saved configuration
+
+Valid changes to export rates, battery settings, solar-production scaling, and
+time-of-use rules save automatically to:
+
+```text
+~/.home-energy-model/config.json
+```
+
+Date ranges, aggregation, chart-series visibility, and the selected page remain
+session-only. Set `HOME_ENERGY_MODEL_CONFIG_PATH` to a complete alternate file
+path for isolated development or testing.
+
+If the file is malformed, uses an unsupported version, or contains unknown
+fields, the app shows a warning, uses defaults for that session, and does not
+overwrite the file.
 
 ## Local inputs and assumptions
 

@@ -156,6 +156,8 @@ The code is divided by responsibility:
   aggregation.
 - `solar_model/periods.py`: rolling week and month range calculation,
   navigation, and labels.
+- `solar_model/configuration.py`: local configuration schema validation,
+  startup loading, and atomic saves.
 - `solar_model/tou.py`: TOU defaults, rule validation, price lookup, and rate
   classification.
 - `solar_model/costs.py`: hourly and total projected utility cost calculation
@@ -350,26 +352,36 @@ maximum AC-side charge and discharge power. These values are editable in Custom
 values mode and read-only nameplate values in Battery preset mode. Starting
 charge and Minimum reserve are not advanced settings.
 
-### 9.5 Session behavior
+### 9.5 Session and durable configuration behavior
 
-The shared period type, date range, rolling-period Start date, and aggregation,
-plus model production-scaling mode, independent annual and monthly production
-values, strategy, battery mode, battery model, battery quantity, custom battery
-values, common battery values, shared TOU edits, and the independent Historical
-and System-model export purchase rates must survive navigation between all
-three pages during the current Streamlit session.
+The shared period type, date range, rolling-period Start date, aggregation, and
+chart-series visibility, plus model production-scaling mode, independent annual
+and monthly production values, strategy, battery mode, battery model, battery
+quantity, custom battery values, common battery values, shared TOU edits, and
+the independent Historical and System-model export purchase rates must survive
+navigation between all three pages during the current Streamlit session.
 
-All settings listed above survive navigation between the application's pages
-during the current Streamlit session. The independent Historical and
-System-model export purchase rates, every battery strategy, mode, preset,
-quantity, common, and custom setting, and the Solar production scaling mode
-with its independent Annual and Monthly values also persist across fresh
-sessions in the local user configuration. Valid Solar production edits are
-saved automatically; an invalid Monthly editor state remains local to the
-current session and does not replace the last valid saved Solar configuration
-or prevent a valid setting in another section from saving. A new installation
-continues to use the listed defaults and does not create a configuration file
-until the user changes one of those persisted settings.
+At startup, before widgets are initialized, the application loads its local
+configuration exactly once. The default path is
+`~/.home-energy-model/config.json`; `HOME_ENERGY_MODEL_CONFIG_PATH` may provide
+a complete alternate file path. The versioned document uses
+`schema_version: 1` and contains only `historical`, `system_model`, `battery`,
+`solar_production`, and `time_of_use` settings. Date range, period type,
+aggregation, chart-series visibility, and selected page remain session-only.
+The Configuration page identifies the resolved path and states that valid
+durable settings save automatically.
+
+Fresh sessions load the independent Historical and System-model export purchase
+rates; every battery strategy, mode, preset, quantity, common, and custom
+setting; Solar production scaling mode with its independent Annual and Monthly
+values; and valid TOU rules. The TOU editor's display fields map to the seven
+semantic JSON keys `name`, `start_date`, `end_date`, `weekdays`, `start_time`,
+`end_time`, and `price_per_kwh`; blank TOU rows are excluded.
+
+Each valid edit saves only its top-level section automatically. Writes validate
+the complete document and atomically replace the destination file. A new
+installation continues to use the listed defaults and does not create a
+configuration file until the user changes a durable setting.
 
 ## 10. Time-of-Use Rules
 
@@ -634,8 +646,19 @@ Model validation rejects:
 - Imported energy without a matching utility price when calculating Projected
   cost.
 
-Errors appear in the page with concise context. Invalid model inputs prevent the
-model run but do not make valid historical data unavailable.
+Configuration validation rejects missing or unknown fields, unsupported schema
+versions, invalid section values, and invalid TOU semantic rows. A missing file
+uses defaults and permits later automatic saves. A malformed, unsupported, or
+unknown-field configuration file shows its path in a warning, uses defaults for
+that session, disables automatic saves, and is never overwritten.
+
+An invalid nonblank Solar or TOU editor value remains visible in the current
+session, shows concise row-specific context, and neither replaces the last
+valid saved section nor prevents a valid edit in another section from saving.
+If a write fails, the current in-session value remains usable and a save error
+with the configuration path remains visible until a later successful save clears
+it. Errors appear in the page with concise context. Invalid model inputs prevent
+the model run but do not make valid historical data unavailable.
 
 ## 15. Verification Requirements
 
@@ -664,6 +687,11 @@ Automated tests cover:
 - All-data, rolling seven-day, rolling one-month, and custom period selection,
   including previous/next navigation and clipped boundary periods.
 - Per-view export purchase defaults, persistence, and Projected cost response.
+- Local configuration path selection, schema validation, startup loading,
+  round-trip persistence, semantic TOU mapping, and atomic replacement.
+- Invalid configuration-file isolation, per-section persistence isolation,
+  visible save failures, invalid editor retention, and transient-view-state
+  exclusion.
 
 The complete suite runs with:
 

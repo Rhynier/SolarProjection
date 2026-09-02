@@ -309,6 +309,9 @@ def _configured_tou_rules() -> list[TouRule]:
 
 
 def render_configuration() -> None:
+    st.caption(
+        f"Settings save automatically to {st.session_state[CONFIG_PATH_KEY]}"
+    )
     _render_production_scaling_configuration()
 
     st.subheader("Time-of-use rules")
@@ -316,10 +319,11 @@ def render_configuration() -> None:
         "SMUD Time-of-Day rates are preloaded. Dates use MM-DD; weekdays use "
         "Mon,Tue,… Holidays are treated as ordinary weekdays."
     )
+    previous_rules = _shared_value(
+        "tou_rules", pd.DataFrame(SMUD_DEFAULT_TOU_ROWS, columns=TOU_COLUMNS)
+    ).copy(deep=True)
     edited_rules = st.data_editor(
-        _shared_value(
-            "tou_rules", pd.DataFrame(SMUD_DEFAULT_TOU_ROWS, columns=TOU_COLUMNS)
-        ),
+        previous_rules,
         num_rows="dynamic",
         width="stretch",
         key=_shared_widget_key("tou_rules"),
@@ -334,6 +338,9 @@ def render_configuration() -> None:
         parse_tou_rules(_nonblank_tou_rows(edited_rules))
     except TouValidationError as error:
         st.error(f"TOU rule is invalid: {error}")
+    else:
+        if not previous_rules.equals(edited_rules):
+            _persist_configuration_section("time_of_use")
 
 
 def _model_state_key(name: str) -> str:
@@ -515,7 +522,7 @@ def _configuration_section_from_state(section: str) -> dict[str, object]:
                     "end_time": str(row["End time"]),
                     "price_per_kwh": float(row["Price ($/kWh)"]),
                 }
-                for row in rules.to_dict("records")
+                for row in _nonblank_tou_rows(rules)
             ]
         }
     raise ValueError(f"Unsupported configuration section {section!r}")
