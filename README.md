@@ -43,10 +43,15 @@ without holiday exceptions. TOU reserve derives Cheap, Less Expensive, and
 Expensive tiers from each season's configured prices and discharges only at the
 seasonal maximum.
 
-The Historical and System model views share one inclusive date range and one
-aggregation setting. The model still simulates every selected hour in order;
-aggregation changes only the chart, summing energy flows and showing the final
-battery level in each hour, day, week, or month bucket.
+The Historical and System model views share one period and one aggregation
+setting. Choose all available data, a seven-day range beginning on a selected
+Start date, a one-month range ending one day before the corresponding date in
+the next month, or a custom inclusive date range. Week and month modes include
+previous/next navigation and clearly identify ranges clipped by the available
+data. New sessions default to a custom one-month range beginning on the first
+date with available data. The model still simulates every selected hour in
+order; aggregation changes only the chart, summing energy flows and showing the
+final battery level in each hour, day, week, or month bucket.
 
 Both views show a Projected cost calculated as hourly grid imports at the
 configured SMUD rate minus grid exports at the configured utility purchase

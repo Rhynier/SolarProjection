@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -10,7 +10,9 @@ def _number_input(app: AppTest, label: str):
 
 
 def _date_input(app: AppTest, label: str):
-    return next(widget for widget in app.date_input if widget.label == label)
+    matches = [widget for widget in app.date_input if widget.label == label]
+    assert matches, f"No date input labeled {label!r}"
+    return matches[0]
 
 
 def _radio(app: AppTest, label: str):
@@ -19,6 +21,16 @@ def _radio(app: AppTest, label: str):
 
 def _selectbox(app: AppTest, label: str):
     return next(widget for widget in app.selectbox if widget.label == label)
+
+
+def _segmented_control(app: AppTest, label: str):
+    matches = [widget for widget in app.segmented_control if widget.label == label]
+    assert matches, f"No segmented control labeled {label!r}"
+    return matches[0]
+
+
+def _button(app: AppTest, label: str):
+    return next(widget for widget in app.button if widget.label == label)
 
 
 def _metric(app: AppTest, label: str):
@@ -48,6 +60,7 @@ def test_app_starts_against_supplied_csvs_without_exceptions():
 def test_date_range_and_aggregation_are_shared_between_views():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
 
+    _segmented_control(app, "Period").set_value("Custom").run()
     date_range = _date_input(app, "Date range")
     start = date_range.value[0] + timedelta(days=10)
     selected_range = (start, start + timedelta(days=9))
@@ -56,6 +69,7 @@ def test_date_range_and_aggregation_are_shared_between_views():
 
     app.radio[0].set_value("System model").run()
 
+    assert _segmented_control(app, "Period").value == "Custom"
     assert _date_input(app, "Date range").value == selected_range
     assert _selectbox(app, "Aggregation").value == "Day"
     assert "Duration (days)" not in [widget.label for widget in app.number_input]
@@ -68,6 +82,140 @@ def test_date_range_and_aggregation_are_shared_between_views():
 
     assert _date_input(app, "Date range").value == updated_range
     assert _selectbox(app, "Aggregation").value == "Hour"
+
+
+def test_period_selector_defaults_to_the_first_available_month():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    period = _segmented_control(app, "Period")
+
+    assert period.options == ["Custom", "Week", "Month", "All"]
+    assert period.value == "Custom"
+    assert app.session_state["shared.date_range"] == (
+        date(2025, 8, 17),
+        date(2025, 9, 16),
+    )
+    assert _date_input(app, "Date range").value == (
+        date(2025, 8, 17),
+        date(2025, 9, 16),
+    )
+
+
+def test_week_period_uses_start_date_and_seven_day_range():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    _segmented_control(app, "Period").set_value("Week").run()
+
+    assert _date_input(app, "Start date").value == date(2025, 8, 17)
+    assert app.session_state["shared.date_range"] == (
+        date(2025, 8, 17),
+        date(2025, 8, 23),
+    )
+    assert any("Aug 17–23, 2025" in caption.value for caption in app.caption)
+
+
+def test_week_navigation_shifts_start_by_seven_days():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    _segmented_control(app, "Period").set_value("Week").run()
+    _button(app, "Next week").click().run()
+
+    assert _date_input(app, "Start date").value == date(2025, 8, 24)
+    assert app.session_state["shared.date_range"] == (
+        date(2025, 8, 24),
+        date(2025, 8, 30),
+    )
+
+
+def test_week_ending_on_last_available_date_is_not_labeled_as_clipped():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    _date_input(app, "Date range").set_value(
+        (date(2026, 8, 11), date(2026, 8, 12))
+    ).run()
+    _segmented_control(app, "Period").set_value("Week").run()
+
+    selected_range = next(
+        caption.value
+        for caption in app.caption
+        if caption.value.startswith("Selected range:")
+    )
+    assert "Aug 11–17, 2026" in selected_range
+    assert "clipped" not in selected_range
+
+
+def test_month_period_ends_day_before_same_date_next_month():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    _date_input(app, "Date range").set_value(
+        (date(2025, 9, 17), date(2025, 9, 30))
+    ).run()
+    _segmented_control(app, "Period").set_value("Month").run()
+
+    assert _date_input(app, "Start date").value == date(2025, 9, 17)
+    assert app.session_state["shared.date_range"] == (
+        date(2025, 9, 17),
+        date(2025, 10, 16),
+    )
+    assert any("Sep 17–Oct 16, 2025" in caption.value for caption in app.caption)
+
+
+def test_month_period_maps_first_to_last_day():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    _date_input(app, "Date range").set_value(
+        (date(2025, 10, 1), date(2025, 10, 5))
+    ).run()
+    _segmented_control(app, "Period").set_value("Month").run()
+
+    assert _date_input(app, "Start date").value == date(2025, 10, 1)
+    assert app.session_state["shared.date_range"] == (
+        date(2025, 10, 1),
+        date(2025, 10, 31),
+    )
+
+
+def test_month_navigation_shifts_start_by_one_month():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    _segmented_control(app, "Period").set_value("Month").run()
+    _button(app, "Next month").click().run()
+
+    assert _date_input(app, "Start date").value == date(2025, 9, 17)
+    assert app.session_state["shared.date_range"] == (
+        date(2025, 9, 17),
+        date(2025, 10, 16),
+    )
+
+
+def test_custom_period_preserves_the_derived_week_range():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    _segmented_control(app, "Period").set_value("Week").run()
+    _date_input(app, "Start date").set_value(date(2025, 9, 10)).run()
+    _segmented_control(app, "Period").set_value("Custom").run()
+
+    assert _date_input(app, "Date range").value == (
+        date(2025, 9, 10),
+        date(2025, 9, 16),
+    )
+
+
+def test_period_mode_and_derived_range_are_shared_between_views():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    _date_input(app, "Date range").set_value(
+        (date(2025, 9, 17), date(2025, 9, 30))
+    ).run()
+    _segmented_control(app, "Period").set_value("Month").run()
+    app.radio[0].set_value("System model").run()
+
+    assert _segmented_control(app, "Period").value == "Month"
+    assert _date_input(app, "Start date").value == date(2025, 9, 17)
+    assert app.session_state["shared.date_range"] == (
+        date(2025, 9, 17),
+        date(2025, 10, 16),
+    )
 
 
 def test_app_does_not_log_deprecated_container_width_warning(capfd):

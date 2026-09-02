@@ -12,6 +12,12 @@ from solar_model.costs import (
     projected_utility_cost,
 )
 from solar_model.data import DataValidationError, load_hourly_energy
+from solar_model.periods import (
+    format_date_range,
+    period_end,
+    period_range,
+    shift_period_start,
+)
 from solar_model.simulation import (
     BatteryConfig,
     SimulationConfig,
@@ -44,6 +50,7 @@ MODEL_WIDGET_PREFIX = "_model."
 SHARED_STATE_PREFIX = "shared."
 SHARED_WIDGET_PREFIX = "_shared."
 AGGREGATION_OPTIONS = ["Auto", "Hour", "Day", "Week", "Month"]
+PERIOD_OPTIONS = ["Custom", "Week", "Month", "All"]
 BATTERY_PRESETS = {
     "Tesla Powerwall 3": {
         "capacity_kwh": 13.5,
@@ -97,11 +104,85 @@ def _store_shared_value(name: str) -> None:
     ]
 
 
-def _date_range_input(hourly: pd.DataFrame):
+def _move_rolling_period(
+    period_type: str,
+    offset: int,
+    min_date: date,
+    max_date: date,
+) -> None:
+    widget_key = _shared_widget_key("period_start_date")
+    st.session_state[widget_key] = shift_period_start(
+        period_type.lower(),
+        st.session_state[widget_key],
+        offset,
+        min_date,
+        max_date,
+    )
+
+
+def _rolling_period_input(
+    period_type: str, min_date: date, max_date: date
+) -> tuple[date, date]:
+    current_range = _shared_value("date_range", (min_date, max_date))
+    widget_key = _shared_widget_key("period_start_date")
+    input_args = {
+        "label": "Start date",
+        "min_value": min_date,
+        "max_value": max_date,
+        "key": widget_key,
+    }
+    if widget_key not in st.session_state:
+        input_args["value"] = current_range[0]
+    start_date = st.sidebar.date_input(**input_args)
+    selected = period_range(period_type.lower(), start_date, max_date)
+    st.session_state[_shared_state_key("date_range")] = selected
+    suffix = (
+        " (clipped to available data)"
+        if period_end(period_type.lower(), start_date) > max_date
+        else ""
+    )
+    st.sidebar.caption(
+        f"Selected range: {format_date_range(*selected)}{suffix}"
+    )
+
+    previous, following = st.sidebar.columns(2)
+    previous.button(
+        f"Previous {period_type.lower()}",
+        disabled=start_date == min_date,
+        on_click=_move_rolling_period,
+        args=(period_type, -1, min_date, max_date),
+        width="stretch",
+    )
+    following.button(
+        f"Next {period_type.lower()}",
+        disabled=start_date == max_date,
+        on_click=_move_rolling_period,
+        args=(period_type, 1, min_date, max_date),
+        width="stretch",
+    )
+    return selected
+
+
+def _date_range_input(hourly: pd.DataFrame) -> tuple[date, date] | object:
     min_date, max_date = _date_bounds(hourly)
+    default_range = period_range("month", min_date, max_date)
+    period_type = st.sidebar.segmented_control(
+        "Period",
+        PERIOD_OPTIONS,
+        default=_shared_value("period_type", "Custom"),
+        key=_shared_widget_key("period_type"),
+        on_change=_store_shared_value,
+        args=("period_type",),
+    )
+    if period_type == "All" or period_type is None:
+        selected = (min_date, max_date)
+        st.session_state[_shared_state_key("date_range")] = selected
+        return selected
+    if period_type in {"Week", "Month"}:
+        return _rolling_period_input(period_type, min_date, max_date)
     return st.sidebar.date_input(
         "Date range",
-        value=_shared_value("date_range", (min_date, max_date)),
+        value=_shared_value("date_range", default_range),
         min_value=min_date,
         max_value=max_date,
         key=_shared_widget_key("date_range"),

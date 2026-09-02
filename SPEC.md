@@ -153,6 +153,8 @@ The code is divided by responsibility:
 - `solar_model/data.py`: CSV validation, normalization, source alignment, and
   household-load derivation.
 - `solar_model/aggregation.py`: inclusive date filtering and energy aggregation.
+- `solar_model/periods.py`: rolling week and month range calculation,
+  navigation, and labels.
 - `solar_model/tou.py`: TOU defaults, rule validation, price lookup, and rate
   classification.
 - `solar_model/costs.py`: projected utility cost calculation and currency
@@ -172,17 +174,38 @@ The Historical view is the default page.
 
 The sidebar provides:
 
-- An inclusive date range constrained to the shared dataset.
+- A period selector with `Custom`, `Week`, `Month`, and `All` options.
 - An aggregation selector: `Auto`, `Hour`, `Day`, `Week`, or `Month`.
 - A multi-select for `Used`, `Production`, and `Grid export`.
 - Utility purchase rate for exported energy, defaulting to `$0.0563/kWh`.
 
-The defaults are the full shared date range, `Auto`, all three series, and the
-export purchase rate above. Exactly two dates and at least one series are
+`Custom` is the default. Its initial inclusive range begins on the first date
+in the shared dataset and ends one calendar month later minus one day. The end
+is clipped to the last available date when the dataset contains less than one
+month. `Custom` provides the inclusive two-date picker constrained to the shared
+dataset and preserves the currently selected range when entered.
+
+`All` selects the full shared date range. `Week` provides a Start date picker
+plus Previous week and Next week buttons. Its inclusive range contains seven
+days beginning on the selected Start date. Previous and Next shift the Start
+date by seven days.
+
+`Month` provides the same Start date picker plus Previous month and Next month
+buttons. Its inclusive range ends one day before the corresponding date in the
+next month. A Start date on the first therefore ends on the last day of that
+calendar month. Previous and Next shift the Start date by one calendar month.
+
+Week and Month display their resulting range below the Start date. A resulting
+end after the last available date is clipped to the shared dataset and labeled
+as clipped. Switching period types uses the current range's Start date.
+
+The other defaults are `Auto`, all three series, and the export purchase rate
+above. Custom selection requires exactly two dates, and at least one series is
 required. The export rate is finite and nonnegative.
 
-The date range and aggregation values are shared with the System model. A
-change made in either view is immediately reflected in the other view.
+The period type, resulting inclusive date range, and aggregation value are
+shared with the System model. A change made in either view is immediately
+reflected in the other view.
 
 ### 8.2 Automatic aggregation
 
@@ -217,7 +240,8 @@ resolution.
 
 The sidebar provides:
 
-- The same inclusive date range used by the Historical view.
+- The same `Custom`, `Week`, `Month`, and `All` period selector used by the
+  Historical view.
 - The same `Auto`, `Hour`, `Day`, `Week`, or `Month` aggregation selector used
   by the Historical view.
 - Solar scale, which must be nonnegative.
@@ -228,10 +252,11 @@ The sidebar provides:
 equivalent_array_kw = 1.29 * solar_scale
 ```
 
-The date range and aggregation values remain synchronized between views. Their
-defaults are the full shared date range and `Auto`. Solar scale defaults to 1.0.
-Aggregation changes chart presentation only; the battery simulation always
-processes each selected hour in chronological order.
+The period type, resulting date range, and aggregation value remain synchronized
+between views. Their defaults are `Custom`, the first available inclusive
+one-month range, and `Auto`. Solar scale defaults to 1.0. Aggregation changes
+chart presentation only; the battery simulation always processes each selected
+hour in chronological order.
 
 ### 9.2 Battery strategy
 
@@ -282,11 +307,11 @@ Starting state of charge must not be below the reserve.
 
 ### 9.5 Session behavior
 
-The shared date range and aggregation, plus model solar scale, strategy, battery
-mode, battery model, battery quantity, custom battery values, common battery
-values, TOU edits, and the independent Historical and System-model export
-purchase rates must survive navigation between the two pages during the current
-Streamlit session.
+The shared period type, date range, rolling-period Start date, and aggregation,
+plus model solar scale, strategy, battery mode, battery model, battery quantity,
+custom battery values, common battery values, TOU edits, and the independent
+Historical and System-model export purchase rates must survive navigation
+between the two pages during the current Streamlit session.
 
 All session settings reset when the application process restarts. No settings
 are written to disk.
@@ -567,6 +592,8 @@ Automated tests cover:
   custom-value restoration, TOU defaults, and absence of known deprecation
   warnings.
 - Synchronized date-range and aggregation controls across both views.
+- All-data, rolling seven-day, rolling one-month, and custom period selection,
+  including previous/next navigation and clipped boundary periods.
 - Per-view export purchase defaults, persistence, and Projected cost response.
 
 The complete suite runs with:
