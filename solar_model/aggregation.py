@@ -6,6 +6,12 @@ import pandas as pd
 
 Bucket = Literal["auto", "hour", "day", "week", "month"]
 VALUE_COLUMNS = ["household_load_kwh", "actual_solar_kwh", "grid_export_kwh"]
+MODEL_ENERGY_COLUMNS = [
+    "household_load_kwh",
+    "modeled_solar_kwh",
+    "grid_import_kwh",
+    "grid_export_kwh",
+]
 
 
 def choose_auto_bucket(start_date: date, end_date: date) -> str:
@@ -47,3 +53,22 @@ def aggregate_history(
         raise ValueError("selected date range contains no energy data")
     selected["bucket_start"] = _bucket_start(selected["timestamp"], resolved)
     return selected.groupby("bucket_start", as_index=False)[VALUE_COLUMNS].sum(), resolved
+
+
+def aggregate_model_result(
+    hourly: pd.DataFrame, start_date: date, end_date: date, bucket: Bucket
+) -> tuple[pd.DataFrame, str]:
+    if end_date < start_date:
+        raise ValueError("end date must not precede start date")
+    resolved = choose_auto_bucket(start_date, end_date) if bucket == "auto" else bucket
+    dates = hourly["timestamp"].dt.date
+    selected = hourly.loc[
+        (dates >= start_date) & (dates <= end_date),
+        ["timestamp", *MODEL_ENERGY_COLUMNS, "battery_soc_kwh"],
+    ].copy()
+    if selected.empty:
+        raise ValueError("selected date range contains no modeled energy data")
+    selected["bucket_start"] = _bucket_start(selected["timestamp"], resolved)
+    aggregations = {column: "sum" for column in MODEL_ENERGY_COLUMNS}
+    aggregations["battery_soc_kwh"] = "last"
+    return selected.groupby("bucket_start", as_index=False).agg(aggregations), resolved

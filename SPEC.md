@@ -21,7 +21,7 @@ The application must:
   selectable time range.
 - Aggregate historical energy into readable hourly, daily, weekly, or monthly
   buckets.
-- Replay one to seven historical days at hourly resolution.
+- Replay any selected historical date range at hourly resolution.
 - Scale production from the existing 1.29 kW solar array to represent a larger
   hypothetical array.
 - Model a configurable battery that charges from solar surplus only.
@@ -181,6 +181,9 @@ The defaults are the full shared date range, `Auto`, all three series, and the
 export purchase rate above. Exactly two dates and at least one series are
 required. The export rate is finite and nonnegative.
 
+The date range and aggregation values are shared with the System model. A
+change made in either view is immediately reflected in the other view.
+
 ### 8.2 Automatic aggregation
 
 Auto selects:
@@ -207,15 +210,16 @@ The page shows:
 
 ## 9. System Model View
 
-The System model replays an inclusive historical period of one through seven
-days at hourly resolution.
+The System model replays the shared inclusive historical date range at hourly
+resolution.
 
 ### 9.1 Period and solar controls
 
 The sidebar provides:
 
-- Start date, constrained to the shared dataset.
-- Duration from 1 to 7 days.
+- The same inclusive date range used by the Historical view.
+- The same `Auto`, `Hour`, `Day`, `Week`, or `Month` aggregation selector used
+  by the Historical view.
 - Solar scale, which must be nonnegative.
 - Utility purchase rate for exported energy, defaulting to `$0.0960/kWh`.
 - Equivalent nominal array size:
@@ -224,8 +228,10 @@ The sidebar provides:
 equivalent_array_kw = 1.29 * solar_scale
 ```
 
-The default period is the latest seven days in the shared dataset. Solar scale
-defaults to 1.0.
+The date range and aggregation values remain synchronized between views. Their
+defaults are the full shared date range and `Auto`. Solar scale defaults to 1.0.
+Aggregation changes chart presentation only; the battery simulation always
+processes each selected hour in chronological order.
 
 ### 9.2 Battery strategy
 
@@ -276,10 +282,11 @@ Starting state of charge must not be below the reserve.
 
 ### 9.5 Session behavior
 
-Model dates, duration, solar scale, strategy, battery mode, battery model,
-battery quantity, custom battery values, common battery values, TOU edits, and
-the independent Historical and System-model export purchase rates must survive
-navigation between the two pages during the current Streamlit session.
+The shared date range and aggregation, plus model solar scale, strategy, battery
+mode, battery model, battery quantity, custom battery values, common battery
+values, TOU edits, and the independent Historical and System-model export
+purchase rates must survive navigation between the two pages during the current
+Streamlit session.
 
 All session settings reset when the application process restarts. No settings
 are written to disk.
@@ -478,12 +485,17 @@ The modeled page shows summary values for:
 - Total grid export.
 - Projected cost for the modeled hourly grid exchange.
 
-The Plotly figure has two vertically aligned panels sharing an hourly time axis:
+The Plotly figure has two vertically aligned panels sharing the selected bucket
+time axis:
 
 1. **Home and battery:** grouped bars for Used and Production, plus a Battery
    state-of-charge line on a secondary kWh axis.
 2. **Grid exchange:** Grid import as positive bars and Grid export as negative
    bars around a zero line.
+
+Used, Production, Grid import, and Grid export are summed within each resolved
+bucket. The Battery line uses the final hourly state of charge in each bucket.
+`Auto` uses the same date-range thresholds specified for the Historical view.
 
 The legend allows each of the five series to be hidden independently.
 
@@ -517,7 +529,6 @@ Source data validation rejects:
 Model validation rejects:
 
 - Dates outside the available shared range.
-- Durations outside 1 through 7 days.
 - Negative or non-finite solar scale, capacity, or power limits.
 - Starting or reserve percentages outside 0 through 100.
 - Starting state of charge below reserve.
@@ -540,7 +551,7 @@ Automated tests cover:
   derivation.
 - Daylight-saving fall-back and spring-forward behavior.
 - Real supplied CSV loading.
-- Auto and manual historical aggregation.
+- Auto and manual historical and modeled-chart aggregation.
 - TOU price parsing, seasonal ranking, overlap precedence, all-day rules,
   overnight rules, and year-wrapping seasons.
 - Default SMUD rates.
@@ -555,6 +566,7 @@ Automated tests cover:
 - Streamlit startup, page navigation, session persistence, battery presets,
   custom-value restoration, TOU defaults, and absence of known deprecation
   warnings.
+- Synchronized date-range and aggregation controls across both views.
 - Per-view export purchase defaults, persistence, and Projected cost response.
 
 The complete suite runs with:
@@ -574,8 +586,8 @@ The application is conformant when:
   this specification.
 - Both views calculate Projected cost over their selected hourly data using the
   specified import prices and independent export purchase rates.
-- Any valid one-to-seven-day period can be replayed with configurable solar,
-  battery, strategy, and TOU inputs.
+- Any valid date range within the shared data can be replayed with configurable
+  solar, battery, strategy, and TOU inputs.
 - Custom and preset battery settings produce the specified effective battery
   configuration and persist for the session.
 - TOU rules use configured prices and the specified seasonal classification.

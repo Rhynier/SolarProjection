@@ -3,6 +3,7 @@ from datetime import date
 import pandas as pd
 import pytest
 
+import solar_model.aggregation as aggregation
 from solar_model.aggregation import aggregate_history, choose_auto_bucket
 
 
@@ -43,3 +44,34 @@ def test_weekly_buckets_start_on_monday():
         hourly_frame(), date(2026, 1, 1), date(2026, 1, 3), "week"
     )
     assert result.loc[0, "bucket_start"] == pd.Timestamp("2025-12-29")
+
+
+def test_model_aggregation_sums_energy_and_keeps_the_final_battery_level():
+    result = pd.DataFrame({
+        "timestamp": pd.to_datetime([
+            "2026-01-01 00:00",
+            "2026-01-01 01:00",
+            "2026-01-02 00:00",
+            "2026-01-02 01:00",
+        ]),
+        "household_load_kwh": [1.0, 2.0, 3.0, 4.0],
+        "modeled_solar_kwh": [0.5, 1.0, 1.5, 2.0],
+        "battery_soc_kwh": [5.0, 4.5, 6.0, 5.5],
+        "grid_import_kwh": [0.5, 1.0, 1.5, 2.0],
+        "grid_export_kwh": [0.0, 0.0, 0.5, 1.0],
+    })
+
+    aggregated, resolved = aggregation.aggregate_model_result(
+        result, date(2026, 1, 1), date(2026, 1, 2), "day"
+    )
+
+    assert resolved == "day"
+    assert list(aggregated["bucket_start"]) == [
+        pd.Timestamp("2026-01-01"),
+        pd.Timestamp("2026-01-02"),
+    ]
+    assert list(aggregated["household_load_kwh"]) == [3.0, 7.0]
+    assert list(aggregated["modeled_solar_kwh"]) == [1.5, 3.5]
+    assert list(aggregated["grid_import_kwh"]) == [1.5, 3.5]
+    assert list(aggregated["grid_export_kwh"]) == [0.0, 1.5]
+    assert list(aggregated["battery_soc_kwh"]) == [4.5, 5.5]

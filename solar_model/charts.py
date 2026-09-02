@@ -63,7 +63,7 @@ def build_model_figure(result: pd.DataFrame) -> go.Figure:
         row_heights=[0.72, 0.28],
         specs=[[{"secondary_y": True}], [{"secondary_y": False}]],
     )
-    timestamps = result["timestamp"]
+    timestamps = result["bucket_start"]
     figure.add_bar(
         name="Used",
         x=timestamps,
@@ -106,7 +106,7 @@ def build_model_figure(result: pd.DataFrame) -> go.Figure:
         row=2,
         col=1,
     )
-    figure.update_yaxes(title_text="Hourly energy (kWh)", row=1, col=1)
+    figure.update_yaxes(title_text="Energy (kWh)", row=1, col=1)
     figure.update_yaxes(
         title_text="Battery level (kWh)", row=1, col=1, secondary_y=True
     )

@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,10 @@ from streamlit.testing.v1 import AppTest
 
 def _number_input(app: AppTest, label: str):
     return next(widget for widget in app.number_input if widget.label == label)
+
+
+def _date_input(app: AppTest, label: str):
+    return next(widget for widget in app.date_input if widget.label == label)
 
 
 def _radio(app: AppTest, label: str):
@@ -38,6 +43,31 @@ def test_app_starts_against_supplied_csvs_without_exceptions():
     assert app.radio[0].options == ["Historical view", "System model"]
     app.radio[0].set_value("System model").run()
     assert not app.exception
+
+
+def test_date_range_and_aggregation_are_shared_between_views():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    date_range = _date_input(app, "Date range")
+    start = date_range.value[0] + timedelta(days=10)
+    selected_range = (start, start + timedelta(days=9))
+    date_range.set_value(selected_range).run()
+    _selectbox(app, "Aggregation").set_value("Day").run()
+
+    app.radio[0].set_value("System model").run()
+
+    assert _date_input(app, "Date range").value == selected_range
+    assert _selectbox(app, "Aggregation").value == "Day"
+    assert "Duration (days)" not in [widget.label for widget in app.number_input]
+    assert not app.error
+
+    updated_range = (start + timedelta(days=1), start + timedelta(days=4))
+    _date_input(app, "Date range").set_value(updated_range).run()
+    _selectbox(app, "Aggregation").set_value("Hour").run()
+    app.radio[0].set_value("Historical view").run()
+
+    assert _date_input(app, "Date range").value == updated_range
+    assert _selectbox(app, "Aggregation").value == "Hour"
 
 
 def test_app_does_not_log_deprecated_container_width_warning(capfd):

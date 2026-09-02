@@ -43,6 +43,11 @@ without holiday exceptions. TOU reserve derives Cheap, Less Expensive, and
 Expensive tiers from each season's configured prices and discharges only at the
 seasonal maximum.
 
+The Historical and System model views share one inclusive date range and one
+aggregation setting. The model still simulates every selected hour in order;
+aggregation changes only the chart, summing energy flows and showing the final
+battery level in each hour, day, week, or month bucket.
+
 Both views show a Projected cost calculated as hourly grid imports at the
 configured SMUD rate minus grid exports at the configured utility purchase
 rate. The Historical view defaults that export rate to $0.0563/kWh; the System

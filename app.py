@@ -1,10 +1,10 @@
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from solar_model.aggregation import aggregate_history
+from solar_model.aggregation import aggregate_history, aggregate_model_result
 from solar_model.charts import build_history_figure, build_model_figure
 from solar_model.costs import (
     CostValidationError,
@@ -41,6 +41,9 @@ TOU_COLUMNS = [
 ]
 MODEL_STATE_PREFIX = "model."
 MODEL_WIDGET_PREFIX = "_model."
+SHARED_STATE_PREFIX = "shared."
+SHARED_WIDGET_PREFIX = "_shared."
+AGGREGATION_OPTIONS = ["Auto", "Hour", "Day", "Week", "Month"]
 BATTERY_PRESETS = {
     "Tesla Powerwall 3": {
         "capacity_kwh": 13.5,
@@ -73,17 +76,55 @@ def _filtered_hourly(
     return hourly.loc[(dates >= start_date) & (dates <= end_date)].copy()
 
 
-def render_history(hourly: pd.DataFrame) -> None:
+def _shared_state_key(name: str) -> str:
+    return f"{SHARED_STATE_PREFIX}{name}"
+
+
+def _shared_widget_key(name: str) -> str:
+    return f"{SHARED_WIDGET_PREFIX}{name}"
+
+
+def _shared_value(name: str, default: object) -> object:
+    state_key = _shared_state_key(name)
+    if state_key not in st.session_state:
+        st.session_state[state_key] = default
+    return st.session_state[state_key]
+
+
+def _store_shared_value(name: str) -> None:
+    st.session_state[_shared_state_key(name)] = st.session_state[
+        _shared_widget_key(name)
+    ]
+
+
+def _date_range_input(hourly: pd.DataFrame):
     min_date, max_date = _date_bounds(hourly)
-    selected_dates = st.sidebar.date_input(
+    return st.sidebar.date_input(
         "Date range",
-        value=(min_date, max_date),
+        value=_shared_value("date_range", (min_date, max_date)),
         min_value=min_date,
         max_value=max_date,
+        key=_shared_widget_key("date_range"),
+        on_change=_store_shared_value,
+        args=("date_range",),
     )
-    bucket_label = st.sidebar.selectbox(
-        "Aggregation", ["Auto", "Hour", "Day", "Week", "Month"]
+
+
+def _aggregation_input() -> str:
+    selected = _shared_value("aggregation", "Auto")
+    return st.sidebar.selectbox(
+        "Aggregation",
+        AGGREGATION_OPTIONS,
+        index=AGGREGATION_OPTIONS.index(selected),
+        key=_shared_widget_key("aggregation"),
+        on_change=_store_shared_value,
+        args=("aggregation",),
     )
+
+
+def render_history(hourly: pd.DataFrame) -> None:
+    selected_dates = _date_range_input(hourly)
+    bucket_label = _aggregation_input()
     visible_series = st.sidebar.multiselect(
         "Series", HISTORY_SERIES, default=HISTORY_SERIES
     )
@@ -186,27 +227,12 @@ def _readonly_preset_value(label: str, name: str, value: float) -> float:
 
 
 def render_model(hourly: pd.DataFrame) -> None:
-    min_date, max_date = _date_bounds(hourly)
-    default_start = max_date - timedelta(days=6)
-    start_date = st.sidebar.date_input(
-        "Start date",
-        value=_model_value("start_date", default_start),
-        min_value=min_date,
-        max_value=max_date,
-        key=_model_widget_key("start_date"),
-        on_change=_store_model_value,
-        args=("start_date",),
-    )
-    duration = st.sidebar.number_input(
-        "Duration (days)",
-        min_value=1,
-        max_value=7,
-        value=_model_value("duration", 7),
-        step=1,
-        key=_model_widget_key("duration"),
-        on_change=_store_model_value,
-        args=("duration",),
-    )
+    selected_dates = _date_range_input(hourly)
+    bucket_label = _aggregation_input()
+    if not isinstance(selected_dates, tuple) or len(selected_dates) != 2:
+        st.error("Choose both a start and end date.")
+        return
+    start_date, end_date = selected_dates
     solar_scale = st.sidebar.number_input(
         "Solar scale",
         min_value=0.0,
@@ -370,10 +396,6 @@ def render_model(hourly: pd.DataFrame) -> None:
         chart_slot.info("Add a valid time-of-use rule to model this period.")
         return
 
-    end_date = start_date + timedelta(days=int(duration) - 1)
-    if end_date > max_date:
-        chart_slot.error("Selected period ends after the available energy data.")
-        return
     selected = _filtered_hourly(hourly, start_date, end_date)
     if selected.empty:
         chart_slot.error("Selected period contains no energy data.")
@@ -398,6 +420,13 @@ def render_model(hourly: pd.DataFrame) -> None:
         chart_slot.error(f"Model settings are invalid: {error}")
         return
     try:
+        aggregated, resolved_bucket = aggregate_model_result(
+            result, start_date, end_date, bucket_label.lower()
+        )
+    except ValueError as error:
+        chart_slot.error(f"Model chart selection is invalid: {error}")
+        return
+    try:
         projected_cost = projected_utility_cost(
             result, rules, export_rate_per_kwh=export_rate
         )
@@ -414,7 +443,8 @@ def render_model(hourly: pd.DataFrame) -> None:
         )
         exported.metric("Grid export", f"{result['grid_export_kwh'].sum():.2f} kWh")
         cost.metric("Projected cost", format_currency(projected_cost))
-        st.plotly_chart(build_model_figure(result), width="stretch")
+        st.caption(f"Showing {resolved_bucket} energy totals.")
+        st.plotly_chart(build_model_figure(aggregated), width="stretch")
 
 
 st.set_page_config(page_title="Home Energy Model", page_icon="☀️", layout="wide")
