@@ -730,6 +730,17 @@ def test_historical_foresight_strategy_explains_its_scope_and_runs():
     assert not any("Model settings are invalid" in error.value for error in app.error)
 
 
+def test_system_model_displays_strategy_metrics():
+    app = _new_app()
+    app.radio[0].set_value("System model").run()
+
+    assert _metric(app, "Solar self-consumed").value.endswith("%")
+    assert _metric(app, "Expensive-period import").value.endswith(" kWh")
+    assert _metric(app, "Battery discharged").value.endswith(" kWh")
+    assert float(_metric(app, "Equivalent cycles").value) >= 0.0
+    assert _metric(app, "Ending charge").value.endswith("%")
+
+
 def test_battery_preset_selection_survives_a_history_round_trip():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
 

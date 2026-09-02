@@ -616,6 +616,16 @@ The modeled page shows summary values for:
 - Grid import during Expensive hours.
 - Total grid export.
 - Projected cost for the modeled hourly grid exchange.
+- Solar self-consumed as modeled solar minus grid export, divided by modeled
+  solar and displayed as a percentage. It is zero when modeled solar is zero.
+- Total AC-side battery discharge output.
+- Equivalent full cycles, calculated as AC-side discharge divided by the
+  discharge leg efficiency and then by usable capacity above reserve. It is
+  zero when capacity above reserve is zero.
+- Ending battery charge as final state of charge divided by usable capacity. It
+  is zero when usable capacity is zero.
+
+All summary values use the hourly result rather than chart aggregation.
 
 The Plotly figure has three vertically aligned panels sharing the selected bucket
 time axis:
@@ -713,6 +723,8 @@ Automated tests cover:
   full-backup dispatch.
 - Historical optimization across multiple hourly prices, export opportunity
   cost, efficiency, missing prices, reserve, capacity, and power limits.
+- Strategy summary arithmetic, including zero-solar and zero-usable-capacity
+  cases.
 - Battery starting charge, reserve, capacity, efficiency, and power limits.
 - Solar-only charging, grid import/export, battery bounds, and hourly energy
   balance.

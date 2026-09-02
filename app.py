@@ -23,6 +23,7 @@ from solar_model.configuration import (
     validate_configuration,
 )
 from solar_model.data import DataValidationError, load_hourly_energy
+from solar_model.metrics import summarize_simulation
 from solar_model.periods import (
     format_date_range,
     period_end,
@@ -1052,16 +1053,33 @@ def render_model(hourly: pd.DataFrame) -> None:
         chart_slot.error(f"Model chart selection is invalid: {error}")
         return
     projected_cost = float(result["net_cost_usd"].sum())
+    summary = summarize_simulation(
+        result,
+        capacity_kwh=capacity,
+        reserve_percent=reserve_percent,
+        round_trip_efficiency=round_trip_percent / 100.0,
+    )
 
     with chart_slot.container():
         imported, expensive, exported, cost = st.columns(4)
         imported.metric("Grid import", f"{result['grid_import_kwh'].sum():.2f} kWh")
         expensive.metric(
-            "Expensive import",
-            f"{result.loc[result['is_expensive'], 'grid_import_kwh'].sum():.2f} kWh",
+            "Expensive-period import",
+            f"{summary.expensive_grid_import_kwh:.2f} kWh",
         )
         exported.metric("Grid export", f"{result['grid_export_kwh'].sum():.2f} kWh")
         cost.metric("Projected cost", format_currency(projected_cost))
+        self_consumed, discharged, cycles, ending = st.columns(4)
+        self_consumed.metric(
+            "Solar self-consumed",
+            f"{summary.solar_self_consumption_percent:.1f}%",
+        )
+        discharged.metric(
+            "Battery discharged",
+            f"{summary.battery_discharge_output_kwh:.2f} kWh",
+        )
+        cycles.metric("Equivalent cycles", f"{summary.equivalent_full_cycles:.2f}")
+        ending.metric("Ending charge", f"{summary.ending_charge_percent:.1f}%")
         st.caption(f"Showing {resolved_bucket} energy totals.")
         st.plotly_chart(build_model_figure(aggregated), width="stretch")
 
