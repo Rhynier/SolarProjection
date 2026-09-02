@@ -447,6 +447,25 @@ def test_loaded_custom_monthly_values_survive_an_annual_edit(
     )
 
 
+def test_loaded_default_monthly_values_survive_an_annual_edit(
+    isolate_user_configuration,
+):
+    save_configuration(isolate_user_configuration, default_configuration())
+
+    app = _new_app()
+    app.radio[0].set_value("Configuration").run()
+    monthly_before_annual_edit = app.session_state["model.monthly_production"].copy(
+        deep=True
+    )
+
+    _number_input(app, "Reference annual production (kWh)").set_value(1500.0).run()
+    _radio(app, "Production scaling").set_value("Monthly").run()
+
+    pd.testing.assert_frame_equal(
+        app.session_state["model.monthly_production"], monthly_before_annual_edit
+    )
+
+
 def test_monthly_initialization_uses_displayed_precision_without_hidden_values():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
     app.radio[0].set_value("Configuration").run()

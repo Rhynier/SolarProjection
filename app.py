@@ -344,7 +344,9 @@ def _model_widget_key(name: str) -> str:
     return f"{MODEL_WIDGET_PREFIX}{name}"
 
 
-def _apply_configuration(document: dict[str, object]) -> None:
+def _apply_configuration(
+    document: dict[str, object], *, monthly_production_was_loaded: bool
+) -> None:
     historical = document["historical"]
     system_model = document["system_model"]
     battery = document["battery"]
@@ -401,13 +403,7 @@ def _apply_configuration(document: dict[str, object]) -> None:
     )
     st.session_state[_model_state_key("monthly_production")] = monthly_production
     st.session_state[_model_state_key("monthly_production_initialized")] = (
-        solar_production["scaling_mode"] == "Monthly"
-        or not monthly_production.equals(
-            _monthly_production_defaults(
-                float(solar_production["annual"]["reference_kwh"]),
-                float(solar_production["annual"]["proposed_kwh"]),
-            )
-        )
+        monthly_production_was_loaded or solar_production["scaling_mode"] == "Monthly"
     )
     st.session_state[_shared_state_key("tou_rules")] = pd.DataFrame(
         [
@@ -437,7 +433,10 @@ def _initialize_configuration() -> None:
     st.session_state[CONFIG_AUTOSAVE_KEY] = loaded.autosave_enabled
     st.session_state[CONFIG_WARNING_KEY] = loaded.warning
     st.session_state[CONFIG_ERROR_KEY] = None
-    _apply_configuration(document)
+    _apply_configuration(
+        document,
+        monthly_production_was_loaded=path.exists() and loaded.autosave_enabled,
+    )
 
 
 def _configuration_section_from_state(section: str) -> dict[str, object]:
