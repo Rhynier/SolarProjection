@@ -12,6 +12,7 @@ MODEL_ENERGY_COLUMNS = [
     "grid_import_kwh",
     "grid_export_kwh",
 ]
+MODEL_SUM_COLUMNS = [*MODEL_ENERGY_COLUMNS, "net_cost_usd"]
 
 
 def choose_auto_bucket(start_date: date, end_date: date) -> str:
@@ -64,11 +65,11 @@ def aggregate_model_result(
     dates = hourly["timestamp"].dt.date
     selected = hourly.loc[
         (dates >= start_date) & (dates <= end_date),
-        ["timestamp", *MODEL_ENERGY_COLUMNS, "battery_soc_kwh"],
+        ["timestamp", *MODEL_SUM_COLUMNS, "battery_soc_kwh"],
     ].copy()
     if selected.empty:
         raise ValueError("selected date range contains no modeled energy data")
     selected["bucket_start"] = _bucket_start(selected["timestamp"], resolved)
-    aggregations = {column: "sum" for column in MODEL_ENERGY_COLUMNS}
+    aggregations = {column: "sum" for column in MODEL_SUM_COLUMNS}
     aggregations["battery_soc_kwh"] = "last"
     return selected.groupby("bucket_start", as_index=False).agg(aggregations), resolved

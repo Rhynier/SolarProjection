@@ -9,6 +9,7 @@ from solar_model.charts import build_history_figure, build_model_figure
 from solar_model.costs import (
     CostValidationError,
     format_currency,
+    hourly_net_costs,
     projected_utility_cost,
 )
 from solar_model.data import DataValidationError, load_hourly_energy
@@ -26,6 +27,7 @@ from solar_model.simulation import (
 )
 from solar_model.tou import (
     SMUD_DEFAULT_TOU_ROWS,
+    TouRule,
     TouValidationError,
     parse_tou_rules,
 )
@@ -228,21 +230,27 @@ def render_history(hourly: pd.DataFrame) -> None:
         return
 
     selected = _filtered_hourly(hourly, start_date, end_date)
+    projected_cost = None
     try:
+        rules = _configured_tou_rules()
         projected_cost = projected_utility_cost(
             selected,
-            parse_tou_rules(SMUD_DEFAULT_TOU_ROWS),
+            rules,
             export_rate_per_kwh=export_rate,
         )
+    except TouValidationError as error:
+        st.error(f"TOU rule is invalid: {error}")
     except CostValidationError as error:
         st.error(f"Projected cost could not be calculated: {error}")
-        return
 
     use, production, export, cost = st.columns(4)
     use.metric("Household use", f"{selected['household_load_kwh'].sum():.2f} kWh")
     production.metric("Solar produced", f"{selected['actual_solar_kwh'].sum():.2f} kWh")
     export.metric("Grid exported", f"{selected['grid_export_kwh'].sum():.2f} kWh")
-    cost.metric("Projected cost", format_currency(projected_cost))
+    cost.metric(
+        "Projected cost",
+        "Unavailable" if projected_cost is None else format_currency(projected_cost),
+    )
     st.caption(f"Showing {resolved_bucket} energy totals.")
     st.plotly_chart(
         build_history_figure(aggregated, visible_series), width="stretch"
@@ -259,6 +267,39 @@ def _nonblank_tou_rows(edited_rules: pd.DataFrame) -> list[dict[str, str]]:
         if any(normalized.values()):
             rows.append(normalized)
     return rows
+
+
+def _configured_tou_rules() -> list[TouRule]:
+    configured = _shared_value(
+        "tou_rules", pd.DataFrame(SMUD_DEFAULT_TOU_ROWS, columns=TOU_COLUMNS)
+    )
+    return parse_tou_rules(_nonblank_tou_rows(configured))
+
+
+def render_configuration() -> None:
+    st.subheader("Time-of-use rules")
+    st.caption(
+        "SMUD Time-of-Day rates are preloaded. Dates use MM-DD; weekdays use "
+        "Mon,Tue,… Holidays are treated as ordinary weekdays."
+    )
+    edited_rules = st.data_editor(
+        _shared_value(
+            "tou_rules", pd.DataFrame(SMUD_DEFAULT_TOU_ROWS, columns=TOU_COLUMNS)
+        ),
+        num_rows="dynamic",
+        width="stretch",
+        key=_shared_widget_key("tou_rules"),
+        column_config={
+            "Price ($/kWh)": st.column_config.NumberColumn(
+                "Price ($/kWh)", min_value=0.0, format="$%.4f"
+            )
+        },
+    )
+    st.session_state[_shared_state_key("tou_rules")] = edited_rules
+    try:
+        parse_tou_rules(_nonblank_tou_rows(edited_rules))
+    except TouValidationError as error:
+        st.error(f"TOU rule is invalid: {error}")
 
 
 def _model_state_key(name: str) -> str:
@@ -451,30 +492,11 @@ def render_model(hourly: pd.DataFrame) -> None:
             )
 
     chart_slot = st.empty()
-    st.subheader("Time-of-use rules")
-    st.caption(
-        "SMUD Time-of-Day rates are preloaded. Dates use MM-DD; weekdays use "
-        "Mon,Tue,… Holidays are treated as ordinary weekdays."
-    )
-    edited_rules = st.data_editor(
-        _model_value(
-            "tou_rules", pd.DataFrame(SMUD_DEFAULT_TOU_ROWS, columns=TOU_COLUMNS)
-        ),
-        num_rows="dynamic",
-        width="stretch",
-        key=_model_widget_key("tou_rules"),
-        column_config={
-            "Price ($/kWh)": st.column_config.NumberColumn(
-                "Price ($/kWh)", min_value=0.0, format="$%.4f"
-            )
-        },
-    )
-    st.session_state[_model_state_key("tou_rules")] = edited_rules
     try:
-        rules = parse_tou_rules(_nonblank_tou_rows(edited_rules))
+        rules = _configured_tou_rules()
     except TouValidationError as error:
-        st.error(f"TOU rule is invalid: {error}")
         chart_slot.info("Add a valid time-of-use rule to model this period.")
+        st.error(f"TOU rule is invalid: {error}")
         return
 
     selected = _filtered_hourly(hourly, start_date, end_date)
@@ -501,19 +523,20 @@ def render_model(hourly: pd.DataFrame) -> None:
         chart_slot.error(f"Model settings are invalid: {error}")
         return
     try:
+        result["net_cost_usd"] = hourly_net_costs(
+            result, rules, export_rate_per_kwh=export_rate
+        )
+    except CostValidationError as error:
+        chart_slot.error(f"Projected cost could not be calculated: {error}")
+        return
+    try:
         aggregated, resolved_bucket = aggregate_model_result(
             result, start_date, end_date, bucket_label.lower()
         )
     except ValueError as error:
         chart_slot.error(f"Model chart selection is invalid: {error}")
         return
-    try:
-        projected_cost = projected_utility_cost(
-            result, rules, export_rate_per_kwh=export_rate
-        )
-    except CostValidationError as error:
-        chart_slot.error(f"Projected cost could not be calculated: {error}")
-        return
+    projected_cost = float(result["net_cost_usd"].sum())
 
     with chart_slot.container():
         imported, expensive, exported, cost = st.columns(4)
@@ -539,11 +562,13 @@ except (OSError, DataValidationError) as error:
 
 page = st.radio(
     "View",
-    ["Historical view", "System model"],
+    ["Historical view", "System model", "Configuration"],
     horizontal=True,
     label_visibility="collapsed",
 )
 if page == "Historical view":
     render_history(hourly)
-else:
+elif page == "System model":
     render_model(hourly)
+else:
+    render_configuration()

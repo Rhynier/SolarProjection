@@ -1,7 +1,13 @@
+import base64
+import json
 from datetime import date, timedelta
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+import plotly.io as pio
 import pytest
+from streamlit.proto.WidgetStates_pb2 import WidgetState
 from streamlit.testing.v1 import AppTest
 
 
@@ -48,11 +54,33 @@ def _energy_value(value: str) -> float:
     return float(value.removesuffix(" kWh").replace(",", ""))
 
 
+def _edit_data_editor(app: AppTest, row: int, column: str, value: object) -> AppTest:
+    editor = app.get("dataframe")[0]
+    widget_states = app._tree.get_widget_states()
+    widget_states.widgets.append(
+        WidgetState(
+            id=editor.proto.id,
+            string_value=json.dumps(
+                {
+                    "edited_rows": {str(row): {column: value}},
+                    "added_rows": [],
+                    "deleted_rows": [],
+                }
+            ),
+        )
+    )
+    return app._tree._runner._run(widget_states, timeout=30)
+
+
 def test_app_starts_against_supplied_csvs_without_exceptions():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
     assert not app.exception
     assert app.title[0].value == "Home Energy Model"
-    assert app.radio[0].options == ["Historical view", "System model"]
+    assert app.radio[0].options == [
+        "Historical view",
+        "System model",
+        "Configuration",
+    ]
     app.radio[0].set_value("System model").run()
     assert not app.exception
 
@@ -324,8 +352,8 @@ def test_custom_battery_values_survive_switching_to_a_preset_and_back():
 def test_smud_prices_are_preloaded_in_the_time_of_use_editor():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
 
-    app.radio[0].set_value("System model").run()
-    rules = app.session_state["model.tou_rules"]
+    app.radio[0].set_value("Configuration").run()
+    rules = app.session_state["shared.tou_rules"]
 
     assert list(rules.columns) == [
         "Name",
@@ -344,6 +372,80 @@ def test_smud_prices_are_preloaded_in_the_time_of_use_editor():
         0.2139,
         0.3765,
     ]
+
+
+def test_time_of_use_editor_is_only_shown_on_the_configuration_page():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    assert "Time-of-use rules" not in [item.value for item in app.subheader]
+    app.radio[0].set_value("System model").run()
+    assert "Time-of-use rules" not in [item.value for item in app.subheader]
+
+    app.radio[0].set_value("Configuration").run()
+
+    assert "Time-of-use rules" in [item.value for item in app.subheader]
+    assert not app.exception
+
+
+def test_time_of_use_editor_edits_persist_across_analytical_views():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+    app.radio[0].set_value("Configuration").run()
+
+    app = _edit_data_editor(app, 0, "Price ($/kWh)", 0.20)
+
+    assert not app.exception
+    assert app.session_state["shared.tou_rules"].iloc[0]["Price ($/kWh)"] == 0.20
+    app.radio[0].set_value("Historical view").run()
+    assert not app.exception
+    app.radio[0].set_value("System model").run()
+    assert not app.exception
+
+
+def test_historical_cost_uses_the_shared_time_of_use_configuration():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+    app.session_state["shared.tou_rules"] = pd.DataFrame(
+        [
+            {
+                "Name": "Free energy",
+                "Start date": "01-01",
+                "End date": "12-31",
+                "Weekdays": "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
+                "Start time": "00:00",
+                "End time": "00:00",
+                "Price ($/kWh)": 0.0,
+            }
+        ]
+    )
+    app.run()
+    _number_input(
+        app, "Utility purchase rate for exported energy ($/kWh)"
+    ).set_value(0.0).run()
+
+    assert _metric(app, "Projected cost").value == "$0.00"
+
+
+def test_invalid_tou_rules_leave_historical_energy_results_available():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+    app.session_state["shared.tou_rules"] = pd.DataFrame(
+        [
+            {
+                "Name": "Invalid rule",
+                "Start date": "not-a-date",
+                "End date": "12-31",
+                "Weekdays": "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
+                "Start time": "00:00",
+                "End time": "00:00",
+                "Price ($/kWh)": 0.20,
+            }
+        ]
+    )
+
+    app.run()
+
+    assert app.error
+    assert _metric(app, "Household use").value.endswith(" kWh")
+    assert _metric(app, "Projected cost").value == "Unavailable"
+    assert len(app.get("plotly_chart")) == 1
 
 
 def test_each_view_has_a_persisted_export_purchase_rate_default():
@@ -402,4 +504,20 @@ def test_system_model_projected_cost_uses_the_configured_export_purchase_rate():
 
     assert initial_cost - updated_cost == pytest.approx(
         exported_kwh * 0.10, abs=0.02
+    )
+
+
+def test_system_model_net_cost_bars_sum_to_the_projected_cost():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+    app.radio[0].set_value("System model").run()
+
+    figure = pio.from_json(app.get("plotly_chart")[0].proto.spec)
+    net_cost_trace = next(trace for trace in figure.data if trace.name == "Net cost")
+    encoded_values = net_cost_trace.to_plotly_json()["y"]
+    net_cost_values = np.frombuffer(
+        base64.b64decode(encoded_values["bdata"]), dtype=encoded_values["dtype"]
+    )
+
+    assert net_cost_values.sum() == pytest.approx(
+        _currency_value(_metric(app, "Projected cost").value), abs=0.01
     )

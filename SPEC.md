@@ -152,13 +152,14 @@ The code is divided by responsibility:
 - `app.py`: Streamlit page shell, controls, session state, and presentation.
 - `solar_model/data.py`: CSV validation, normalization, source alignment, and
   household-load derivation.
-- `solar_model/aggregation.py`: inclusive date filtering and energy aggregation.
+- `solar_model/aggregation.py`: inclusive date filtering and energy and cost
+  aggregation.
 - `solar_model/periods.py`: rolling week and month range calculation,
   navigation, and labels.
 - `solar_model/tou.py`: TOU defaults, rule validation, price lookup, and rate
   classification.
-- `solar_model/costs.py`: projected utility cost calculation and currency
-  formatting.
+- `solar_model/costs.py`: hourly and total projected utility cost calculation
+  and currency formatting.
 - `solar_model/simulation.py`: deterministic hourly solar and battery replay.
 - `solar_model/charts.py`: Plotly chart construction and stable styling.
 - `tests/`: unit, integration, real-data, and Streamlit smoke tests.
@@ -309,19 +310,23 @@ Starting state of charge must not be below the reserve.
 
 The shared period type, date range, rolling-period Start date, and aggregation,
 plus model solar scale, strategy, battery mode, battery model, battery quantity,
-custom battery values, common battery values, TOU edits, and the independent
+custom battery values, common battery values, shared TOU edits, and the independent
 Historical and System-model export purchase rates must survive navigation
-between the two pages during the current Streamlit session.
+between all three pages during the current Streamlit session.
 
 All session settings reset when the application process restarts. No settings
 are written to disk.
 
 ## 10. Time-of-Use Rules
 
+The Configuration page contains the shared Time-of-use rules editor. Historical
+cost calculation and System-model simulation and cost calculation use the same
+configured rules.
+
 ### 10.1 Editor schema
 
-The editable table appears in the main content area beneath the modeled result
-and contains:
+The editable table appears in the Configuration page's main content area and
+contains:
 
 - `Name`
 - `Start date` in `MM-DD` format.
@@ -388,9 +393,9 @@ projected_cost =
     - sum(grid_export_kwh * export_purchase_rate_per_kwh)
 ```
 
-Historical View uses the filtered normalized hourly data and the preloaded SMUD
-schedule for import prices. System model uses its simulated hourly grid import
-and export and the currently edited TOU rules.
+Historical View uses the filtered normalized hourly data and the configured TOU
+rules for import prices. System model uses its simulated hourly grid import and
+export and the same configured TOU rules.
 
 Each view has its own persisted export purchase rate. Historical defaults to
 `$0.0563/kWh`; System model defaults to `$0.0960/kWh`. These settings are finite
@@ -510,19 +515,22 @@ The modeled page shows summary values for:
 - Total grid export.
 - Projected cost for the modeled hourly grid exchange.
 
-The Plotly figure has two vertically aligned panels sharing the selected bucket
+The Plotly figure has three vertically aligned panels sharing the selected bucket
 time axis:
 
 1. **Home and battery:** grouped bars for Used and Production, plus a Battery
    state-of-charge line on a secondary kWh axis.
 2. **Grid exchange:** Grid import as positive bars and Grid export as negative
    bars around a zero line.
+3. **Net cost:** one signed bar per bucket around a zero line. Positive values
+   are net charges and negative values are net export credits.
 
-Used, Production, Grid import, and Grid export are summed within each resolved
-bucket. The Battery line uses the final hourly state of charge in each bucket.
-`Auto` uses the same date-range thresholds specified for the Historical view.
+Used, Production, Grid import, Grid export, and hourly Net cost are summed within
+each resolved bucket. The Battery line uses the final hourly state of charge in
+each bucket. The Net cost bars sum to the Projected cost summary. `Auto` uses the
+same date-range thresholds specified for the Historical view.
 
-The legend allows each of the five series to be hidden independently.
+The legend allows each of the six series to be hidden independently.
 
 The stable color mapping is:
 
@@ -531,10 +539,11 @@ The stable color mapping is:
 - Battery: violet `#7C3AED`.
 - Grid import: red `#DC2626`.
 - Grid export: green `#059669`.
+- Net cost: teal `#0F766E`.
 
 The application uses a wide page layout. Scalar controls live in the sidebar;
-the wider TOU table lives in the main content area. Streamlit's responsive
-layout handles narrower windows.
+the wider TOU table lives in the Configuration page's main content area.
+Streamlit's responsive layout handles narrower windows.
 
 ## 14. Validation and Error Handling
 
@@ -618,6 +627,8 @@ The application is conformant when:
 - Custom and preset battery settings produce the specified effective battery
   configuration and persist for the session.
 - TOU rules use configured prices and the specified seasonal classification.
+- The modeled Net cost chart has one signed bar per resolved bucket and sums to
+  the Projected cost summary.
 - Battery dispatch obeys reserve, capacity, efficiency, power, strategy, and
   solar-only charging rules.
 - Modeled charts and summary values use the specified signs, axes, traces, and

@@ -38,10 +38,10 @@ only; the historical household-load curve stays fixed. The battery charges from
 solar surplus only, never from the grid. Both self-consumption and TOU-reserve
 strategies obey usable capacity, reserve, starting charge, AC-side charge and
 discharge limits, and symmetric per-leg efficiency derived from the configured
-round-trip efficiency. The TOU editor starts with SMUD's published 2026 rates,
-without holiday exceptions. TOU reserve derives Cheap, Less Expensive, and
-Expensive tiers from each season's configured prices and discharges only at the
-seasonal maximum.
+round-trip efficiency. The Configuration view's shared TOU editor starts with
+SMUD's published 2026 rates, without holiday exceptions. TOU reserve derives
+Cheap, Less Expensive, and Expensive tiers from each season's configured prices
+and discharges only at the seasonal maximum.
 
 The Historical and System model views share one period and one aggregation
 setting. Choose all available data, a seven-day range beginning on a selected
@@ -53,11 +53,13 @@ date with available data. The model still simulates every selected hour in
 order; aggregation changes only the chart, summing energy flows and showing the
 final battery level in each hour, day, week, or month bucket.
 
-Both views show a Projected cost calculated as hourly grid imports at the
-configured SMUD rate minus grid exports at the configured utility purchase
-rate. The Historical view defaults that export rate to $0.0563/kWh; the System
-model defaults it to $0.0960/kWh. The projection excludes fixed charges, taxes,
-fees, and other bill adjustments.
+Both views show a Projected cost calculated as hourly grid imports at the shared
+configured TOU rate minus grid exports at the configured utility purchase rate.
+The Historical view defaults that export rate to $0.0563/kWh; the System model
+defaults it to $0.0960/kWh. Beneath the model's Grid exchange panel, one signed
+Net cost bar per time bucket shows net charges above zero and net export credits
+below zero. The projection excludes fixed charges, taxes, fees, and other bill
+adjustments.
 
 The CSVs and Streamlit session settings remain local and uncommitted. Restart
 the app after replacing either CSV export.
