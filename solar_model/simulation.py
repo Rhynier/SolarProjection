@@ -4,10 +4,16 @@ from typing import Literal, Sequence
 
 import pandas as pd
 
+from .optimization import OptimizationError, optimize_historical_dispatch
 from .tou import TouRule, has_seasonal_price_spread, is_expensive
 
 
-Strategy = Literal["self_consumption", "tou_reserve"]
+Strategy = Literal[
+    "self_consumption",
+    "tou_reserve",
+    "cost_optimized",
+    "full_backup",
+]
 
 
 class SimulationValidationError(ValueError):
@@ -30,6 +36,7 @@ class SimulationConfig:
     battery: BatteryConfig
     strategy: Strategy
     monthly_solar_scales: tuple[float, ...] | None = None
+    export_rate_per_kwh: float | None = None
 
 
 def _require_finite(value: object, name: str) -> None:
@@ -81,12 +88,33 @@ def _validate_config(config: SimulationConfig, tou_rules: Sequence[TouRule]) -> 
         raise SimulationValidationError("starting_percent must be between 0 and 100")
     if not 0 <= battery.reserve_percent <= 100:
         raise SimulationValidationError("reserve_percent must be between 0 and 100")
-    if battery.starting_percent < battery.reserve_percent:
+    if (
+        config.strategy != "full_backup"
+        and battery.starting_percent < battery.reserve_percent
+    ):
         raise SimulationValidationError("starting_percent must not be below reserve_percent")
     if not 0 < battery.round_trip_efficiency <= 1:
         raise SimulationValidationError("round_trip_efficiency must be in (0, 1]")
-    if config.strategy not in {"self_consumption", "tou_reserve"}:
-        raise SimulationValidationError("strategy must be self_consumption or tou_reserve")
+    if config.strategy not in {
+        "self_consumption",
+        "tou_reserve",
+        "cost_optimized",
+        "full_backup",
+    }:
+        raise SimulationValidationError(
+            "strategy must be self_consumption, tou_reserve, cost_optimized, "
+            "or full_backup"
+        )
+    if config.strategy == "cost_optimized":
+        if config.export_rate_per_kwh is None:
+            raise SimulationValidationError(
+                "cost_optimized requires export_rate_per_kwh"
+            )
+        _require_finite(config.export_rate_per_kwh, "export_rate_per_kwh")
+        if config.export_rate_per_kwh < 0:
+            raise SimulationValidationError(
+                "export_rate_per_kwh must not be negative"
+            )
     if config.strategy == "tou_reserve" and not has_seasonal_price_spread(
         tou_rules
     ):
@@ -111,38 +139,68 @@ def simulate(
 
     leg_efficiency = sqrt(config.battery.round_trip_efficiency)
     capacity = config.battery.capacity_kwh
-    reserve = capacity * config.battery.reserve_percent / 100.0
-    soc = capacity * config.battery.starting_percent / 100.0
+    if config.strategy == "full_backup":
+        reserve = capacity
+        soc = capacity
+    else:
+        reserve = capacity * config.battery.reserve_percent / 100.0
+        soc = capacity * config.battery.starting_percent / 100.0
     results: list[dict[str, object]] = []
-
-    for row in hourly.itertuples(index=False):
-        solar_scale = (
+    modeled_solar_by_hour = [
+        row.actual_solar_kwh
+        * (
             config.solar_scale
             if config.monthly_solar_scales is None
             else config.monthly_solar_scales[row.timestamp.month - 1]
         )
-        modeled_solar = row.actual_solar_kwh * solar_scale
+        for row in hourly.itertuples(index=False)
+    ]
+
+    optimized_charge: Sequence[float] | None = None
+    optimized_discharge: Sequence[float] | None = None
+    if config.strategy == "cost_optimized":
+        assert config.export_rate_per_kwh is not None
+        try:
+            optimized_charge, optimized_discharge = optimize_historical_dispatch(
+                hourly,
+                modeled_solar_by_hour,
+                config.battery,
+                tou_rules,
+                config.export_rate_per_kwh,
+            )
+        except OptimizationError as error:
+            raise SimulationValidationError(str(error)) from error
+
+    for index, row in enumerate(hourly.itertuples(index=False)):
+        modeled_solar = modeled_solar_by_hour[index]
         direct_solar = min(modeled_solar, row.household_load_kwh)
         surplus = modeled_solar - direct_solar
         deficit = row.household_load_kwh - direct_solar
-        charge_input = min(
-            surplus,
-            config.battery.max_charge_kw,
-            (capacity - soc) / leg_efficiency,
-        )
+        if optimized_charge is None:
+            charge_input = min(
+                surplus,
+                config.battery.max_charge_kw,
+                (capacity - soc) / leg_efficiency,
+            )
+        else:
+            charge_input = float(optimized_charge[index])
         soc += charge_input * leg_efficiency
         soc = _clamp_soc_drift(soc, reserve, capacity)
         grid_export = surplus - charge_input
 
         expensive = is_expensive(row.timestamp.to_pydatetime(), tou_rules)
         may_discharge = config.strategy == "self_consumption" or expensive
-        discharge_output = 0.0
-        if may_discharge:
+        if optimized_discharge is not None:
+            discharge_output = float(optimized_discharge[index])
+        elif may_discharge:
             discharge_output = min(
                 deficit,
                 config.battery.max_discharge_kw,
                 (soc - reserve) * leg_efficiency,
             )
+        else:
+            discharge_output = 0.0
+        if discharge_output:
             soc -= discharge_output / leg_efficiency
             soc = _clamp_soc_drift(soc, reserve, capacity)
         grid_import = deficit - discharge_output

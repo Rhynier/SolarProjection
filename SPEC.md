@@ -25,7 +25,8 @@ The application must:
 - Scale historical solar production from configurable reference and proposed
   production, using either one annual ratio or twelve calendar-month ratios.
 - Model a configurable battery that charges from solar surplus only.
-- Support both self-consumption and time-of-use reserve strategies.
+- Support self-consumption, fixed time-of-use reserve, historical-cost
+  optimization, and full-backup strategies.
 - Display modeled household use, production, battery state of charge, grid
   import, and grid export.
 - Display projected utility energy cost for the selected data in both views.
@@ -57,6 +58,7 @@ The application uses:
 - Python 3.11 or later within the supported project range.
 - Streamlit for the local user interface.
 - pandas and NumPy for data processing.
+- SciPy for continuous historical-cost dispatch optimization.
 - Plotly for charts.
 - pytest for automated verification.
 
@@ -303,7 +305,9 @@ selected hour in chronological order.
 The strategy choices are:
 
 - `Self-consumption`
-- `TOU reserve`
+- `Fixed TOU reserve`
+- `Cost optimized (historical foresight)`
+- `Full backup`
 
 Self-consumption is the default.
 
@@ -314,7 +318,17 @@ Immediately below the Battery strategy selector, the sidebar provides:
 
 Starting state of charge must not be below the reserve. These controls appear
 before the Battery settings mode selector and remain editable in both battery
-settings modes.
+settings modes. Full backup instead displays disabled effective values of 100
+percent for both controls. Selecting Full backup does not overwrite the user's
+stored editable starting charge or reserve, which return when another strategy
+is selected.
+
+Fixed TOU reserve is a deterministic peak-period strategy, not a claim of exact
+Enphase Savings or AI Optimization behavior. Cost optimized uses the recorded
+future load and solar within the selected period and is labeled as historical
+foresight rather than a production forecast. Its projected cost is an idealized
+utility-energy comparison that excludes battery degradation and other bill
+charges. Full backup represents normal on-grid operation only.
 
 ### 9.3 Battery settings modes
 
@@ -537,11 +551,28 @@ small floating-point tolerance at a boundary.
 **Self-consumption** permits discharge for every load deficit while stored
 energy remains above reserve.
 
-**TOU reserve** permits discharge only during hours classified as Expensive.
+**Fixed TOU reserve** permits discharge only during hours classified as Expensive.
 At Cheap, Less Expensive, or unmatched hours, grid import serves the remaining
 deficit and battery energy is preserved.
 
-Both strategies always permit direct solar use and solar-only charging.
+**Cost optimized (historical foresight)** minimizes projected utility energy
+cost across the complete selected period using its recorded hourly load,
+recorded and scaled solar production, configured hourly import prices, and the
+System-model export purchase rate. The continuous optimizer may forgo charging
+when the lost export credit is worth more than a later efficiency-adjusted
+import reduction. It may preserve limited stored energy for a later,
+higher-priced load deficit. It has no terminal state-of-charge target, so the
+selected period's starting charge is available to use and the optimizer may end
+at reserve. It does not include a battery degradation or cycling cost.
+
+**Full backup** uses an effective starting state of charge and reserve equal to
+100 percent of usable capacity. It does not discharge while the grid is
+available. Because this prototype does not model grid charging or outages, a
+Full-backup replay begins full and the battery remains full.
+
+All four strategies permit direct solar use. Charging is always limited to
+solar surplus, and discharge is always limited to remaining household load;
+none of the strategies charges from or discharges directly to the grid.
 
 ### 12.5 Hourly energy balance
 
@@ -674,7 +705,10 @@ Automated tests cover:
 - Default SMUD rates.
 - Projected-cost arithmetic, export credit, missing import prices, invalid
   export rates, and net-credit formatting.
-- Self-consumption and TOU-reserve dispatch.
+- Self-consumption, fixed-TOU-reserve, historical-cost-optimized, and
+  full-backup dispatch.
+- Historical optimization across multiple hourly prices, export opportunity
+  cost, efficiency, missing prices, reserve, capacity, and power limits.
 - Battery starting charge, reserve, capacity, efficiency, and power limits.
 - Solar-only charging, grid import/export, battery bounds, and hourly energy
   balance.
@@ -719,6 +753,9 @@ The application is conformant when:
   the Projected cost summary.
 - Battery dispatch obeys reserve, capacity, efficiency, power, strategy, and
   solar-only charging rules.
+- Historical-cost optimization uses configured import and export prices without
+  grid charging, battery export, or claims of matching Enphase's proprietary
+  forecast behavior.
 - Modeled charts and summary values use the specified signs, axes, traces, and
   colors.
 - Invalid inputs produce clear local errors instead of guessed or silently

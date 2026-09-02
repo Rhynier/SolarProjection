@@ -7,7 +7,7 @@ name = "home-energy-model"
 version = "0.1.0"
 description = "Local prototype for historical and modeled home energy use"
 requires-python = ">=3.11"
-dependencies = ["numpy", "pandas", "plotly", "streamlit"]
+dependencies = ["numpy", "pandas", "plotly", "scipy>=1.11", "streamlit"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
