@@ -29,6 +29,7 @@ class SimulationConfig:
     solar_scale: float
     battery: BatteryConfig
     strategy: Strategy
+    monthly_solar_scales: tuple[float, ...] | None = None
 
 
 def _require_finite(value: object, name: str) -> None:
@@ -56,6 +57,22 @@ def _validate_config(config: SimulationConfig, tou_rules: Sequence[TouRule]) -> 
 
     if config.solar_scale < 0:
         raise SimulationValidationError("solar_scale must not be negative")
+    if config.monthly_solar_scales is not None:
+        if len(config.monthly_solar_scales) != 12:
+            raise SimulationValidationError(
+                "monthly_solar_scales must contain 12 values"
+            )
+        try:
+            valid_monthly_scales = all(
+                isfinite(scale) and scale >= 0
+                for scale in config.monthly_solar_scales
+            )
+        except (TypeError, ValueError):
+            valid_monthly_scales = False
+        if not valid_monthly_scales:
+            raise SimulationValidationError(
+                "monthly_solar_scales must contain finite nonnegative values"
+            )
     if battery.capacity_kwh < 0:
         raise SimulationValidationError("capacity_kwh must not be negative")
     if battery.max_charge_kw < 0 or battery.max_discharge_kw < 0:
@@ -99,7 +116,12 @@ def simulate(
     results: list[dict[str, object]] = []
 
     for row in hourly.itertuples(index=False):
-        modeled_solar = row.actual_solar_kwh * config.solar_scale
+        solar_scale = (
+            config.solar_scale
+            if config.monthly_solar_scales is None
+            else config.monthly_solar_scales[row.timestamp.month - 1]
+        )
+        modeled_solar = row.actual_solar_kwh * solar_scale
         direct_solar = min(modeled_solar, row.household_load_kwh)
         surplus = modeled_solar - direct_solar
         deficit = row.household_load_kwh - direct_solar

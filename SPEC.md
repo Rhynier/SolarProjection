@@ -1,7 +1,7 @@
 # Home Energy Model Specification
 
 **Status:** Authoritative specification for the current prototype
-**Last updated:** 2026-09-01
+**Last updated:** 2026-09-02
 
 ## 1. Purpose
 
@@ -22,8 +22,8 @@ The application must:
 - Aggregate historical energy into readable hourly, daily, weekly, or monthly
   buckets.
 - Replay any selected historical date range at hourly resolution.
-- Scale production from the existing 1.29 kW solar array to represent a larger
-  hypothetical array.
+- Scale historical solar production from configurable reference and proposed
+  production, using either one annual ratio or twelve calendar-month ratios.
 - Model a configurable battery that charges from solar surplus only.
 - Support both self-consumption and time-of-use reserve strategies.
 - Display modeled household use, production, battery state of charge, grid
@@ -111,7 +111,7 @@ absolute timestamps are invalid. Production must be finite, numeric, and
 nonnegative.
 
 Production is converted from Wh to kWh and summed by the local date and hour
-used by the utility export. The nominal source system size is 1.29 kW.
+used by the utility export.
 
 ### 5.3 Daylight-saving behavior
 
@@ -152,13 +152,16 @@ The code is divided by responsibility:
 - `app.py`: Streamlit page shell, controls, session state, and presentation.
 - `solar_model/data.py`: CSV validation, normalization, source alignment, and
   household-load derivation.
-- `solar_model/aggregation.py`: inclusive date filtering and energy aggregation.
+- `solar_model/aggregation.py`: inclusive date filtering and energy and cost
+  aggregation.
 - `solar_model/periods.py`: rolling week and month range calculation,
   navigation, and labels.
+- `solar_model/configuration.py`: local configuration schema validation,
+  startup loading, and atomic saves.
 - `solar_model/tou.py`: TOU defaults, rule validation, price lookup, and rate
   classification.
-- `solar_model/costs.py`: projected utility cost calculation and currency
-  formatting.
+- `solar_model/costs.py`: hourly and total projected utility cost calculation
+  and currency formatting.
 - `solar_model/simulation.py`: deterministic hourly solar and battery replay.
 - `solar_model/charts.py`: Plotly chart construction and stable styling.
 - `tests/`: unit, integration, real-data, and Streamlit smoke tests.
@@ -238,25 +241,62 @@ resolution.
 
 ### 9.1 Period and solar controls
 
-The sidebar provides:
+The System model sidebar provides:
 
 - The same `Custom`, `Week`, `Month`, and `All` period selector used by the
   Historical view.
 - The same `Auto`, `Hour`, `Day`, `Week`, or `Month` aggregation selector used
   by the Historical view.
-- Solar scale, which must be nonnegative.
 - Utility purchase rate for exported energy, defaulting to `$0.0960/kWh`.
-- Equivalent nominal array size:
+
+The Configuration page contains a `Solar production scaling` section before
+the `Time-of-use rules` section. The production-scaling section provides:
+
+- An `Annual` or `Monthly` production-scaling mode, defaulting to `Annual`.
+- Reference annual solar production in kWh, which must be greater than zero in
+  Annual mode.
+- Proposed-system annual solar production in kWh, which must be nonnegative in
+  Annual mode.
+- The calculated annual production scale:
 
 ```text
-equivalent_array_kw = 1.29 * solar_scale
+solar_scale = proposed_annual_production_kwh / reference_annual_production_kwh
 ```
+
+Monthly mode provides a fixed twelve-row editor with Month, Reference
+production, Proposed production, and calculated Scale columns. Month and Scale
+are read-only. Reference and Proposed production are required numeric values.
+Every monthly reference value must be finite and greater than zero, and every
+monthly proposed value must be finite and nonnegative. Invalid cells produce a
+month-specific error and prevent simulation. Each scale is calculated as:
+
+```text
+monthly_solar_scale[month] = proposed_monthly_production_kwh[month]
+                           / reference_monthly_production_kwh[month]
+```
+
+The first time Monthly mode is selected, each monthly reference and proposed
+value is initialized by distributing its corresponding retained Annual-mode
+value as evenly as possible at the editor's four-decimal kWh precision across
+the twelve months. The displayed monthly values therefore sum to the retained
+annual value, including when the annual reference is the minimum `0.01 kWh`.
+In Monthly mode, the annual reference and proposed controls are
+read-only and display the sums of their respective monthly columns. The UI
+states that calendar-month scales are active rather than presenting the annual
+totals ratio as an applied scale. Annual and Monthly values remain independent:
+returning to Annual mode restores the prior editable Annual-mode values, and
+returning to Monthly mode restores the prior monthly values.
+
+The System model does not repeat the editable production controls. Its sidebar
+shows a read-only summary of the active annual scale or states that monthly
+calendar scales are active.
 
 The period type, resulting date range, and aggregation value remain synchronized
 between views. Their defaults are `Custom`, the first available inclusive
-one-month range, and `Auto`. Solar scale defaults to 1.0. Aggregation changes
-chart presentation only; the battery simulation always processes each selected
-hour in chronological order.
+one-month range, and `Auto`. Annual-mode reference and proposed production both
+default to `2017.56 kWh`, producing a default solar scale of `1.0`. Aggregation
+changes chart presentation only; the battery simulation always processes each
+selected hour in chronological order.
 
 ### 9.2 Battery strategy
 
@@ -266,6 +306,15 @@ The strategy choices are:
 - `TOU reserve`
 
 Self-consumption is the default.
+
+Immediately below the Battery strategy selector, the sidebar provides:
+
+- Starting state of charge from 0 through 100 percent, default 50 percent.
+- Minimum reserve from 0 through 100 percent, default 10 percent.
+
+Starting state of charge must not be below the reserve. These controls appear
+before the Battery settings mode selector and remain editable in both battery
+settings modes.
 
 ### 9.3 Battery settings modes
 
@@ -296,32 +345,54 @@ efficiency does not scale. Preset-derived fields are read-only.
 Switching between custom and preset modes must preserve the user's custom
 values for the current session.
 
-### 9.4 Common battery controls
+### 9.4 Advanced battery settings
 
-Both battery modes provide:
+The Advanced battery settings expander contains round-trip efficiency and the
+maximum AC-side charge and discharge power. These values are editable in Custom
+values mode and read-only nameplate values in Battery preset mode. Starting
+charge and Minimum reserve are not advanced settings.
 
-- Starting state of charge from 0 through 100 percent, default 50 percent.
-- Minimum reserve from 0 through 100 percent, default 10 percent.
+### 9.5 Session and durable configuration behavior
 
-Starting state of charge must not be below the reserve.
+The shared period type, date range, rolling-period Start date, aggregation, and
+chart-series visibility, plus model production-scaling mode, independent annual
+and monthly production values, strategy, battery mode, battery model, battery
+quantity, custom battery values, common battery values, shared TOU edits, and
+the independent Historical and System-model export purchase rates must survive
+navigation between all three pages during the current Streamlit session.
 
-### 9.5 Session behavior
+At startup, before widgets are initialized, the application loads its local
+configuration exactly once. The default path is
+`~/.home-energy-model/config.json`; `HOME_ENERGY_MODEL_CONFIG_PATH` may provide
+a complete alternate file path. The versioned document uses
+`schema_version: 1` and contains only `historical`, `system_model`, `battery`,
+`solar_production`, and `time_of_use` settings. Date range, period type,
+aggregation, chart-series visibility, and selected page remain session-only.
+The Configuration page identifies the resolved path and states that valid
+durable settings save automatically.
 
-The shared period type, date range, rolling-period Start date, and aggregation,
-plus model solar scale, strategy, battery mode, battery model, battery quantity,
-custom battery values, common battery values, TOU edits, and the independent
-Historical and System-model export purchase rates must survive navigation
-between the two pages during the current Streamlit session.
+Fresh sessions load the independent Historical and System-model export purchase
+rates; every battery strategy, mode, preset, quantity, common, and custom
+setting; Solar production scaling mode with its independent Annual and Monthly
+values; and valid TOU rules. The TOU editor's display fields map to the seven
+semantic JSON keys `name`, `start_date`, `end_date`, `weekdays`, `start_time`,
+`end_time`, and `price_per_kwh`; blank TOU rows are excluded.
 
-All session settings reset when the application process restarts. No settings
-are written to disk.
+Each valid edit saves only its top-level section automatically. Writes validate
+the complete document and atomically replace the destination file. A new
+installation continues to use the listed defaults and does not create a
+configuration file until the user changes a durable setting.
 
 ## 10. Time-of-Use Rules
 
+The Configuration page contains the shared Time-of-use rules editor immediately
+after the Solar production scaling section. Historical cost calculation and
+System-model simulation and cost calculation use the same configured rules.
+
 ### 10.1 Editor schema
 
-The editable table appears in the main content area beneath the modeled result
-and contains:
+The editable table appears in the Configuration page's main content area and
+contains:
 
 - `Name`
 - `Start date` in `MM-DD` format.
@@ -388,9 +459,9 @@ projected_cost =
     - sum(grid_export_kwh * export_purchase_rate_per_kwh)
 ```
 
-Historical View uses the filtered normalized hourly data and the preloaded SMUD
-schedule for import prices. System model uses its simulated hourly grid import
-and export and the currently edited TOU rules.
+Historical View uses the filtered normalized hourly data and the configured TOU
+rules for import prices. System model uses its simulated hourly grid import and
+export and the same configured TOU rules.
 
 Each view has its own persisted export purchase rate. Historical defaults to
 `$0.0563/kWh`; System model defaults to `$0.0960/kWh`. These settings are finite
@@ -408,7 +479,8 @@ charges, taxes, fees, and other utility bill adjustments.
 
 For each selected historical hour, the simulation:
 
-1. Multiplies actual solar production by the solar scale.
+1. Multiplies actual solar production by either the Annual-mode scale or, in
+   Monthly mode, the scale for the hour's calendar month.
 2. Applies modeled solar directly to household load.
 3. Sends solar surplus to the battery, subject to capacity, charge-power, and
    efficiency limits.
@@ -510,19 +582,22 @@ The modeled page shows summary values for:
 - Total grid export.
 - Projected cost for the modeled hourly grid exchange.
 
-The Plotly figure has two vertically aligned panels sharing the selected bucket
+The Plotly figure has three vertically aligned panels sharing the selected bucket
 time axis:
 
 1. **Home and battery:** grouped bars for Used and Production, plus a Battery
    state-of-charge line on a secondary kWh axis.
 2. **Grid exchange:** Grid import as positive bars and Grid export as negative
    bars around a zero line.
+3. **Net cost:** one signed bar per bucket around a zero line. Positive values
+   are net charges and negative values are net export credits.
 
-Used, Production, Grid import, and Grid export are summed within each resolved
-bucket. The Battery line uses the final hourly state of charge in each bucket.
-`Auto` uses the same date-range thresholds specified for the Historical view.
+Used, Production, Grid import, Grid export, and hourly Net cost are summed within
+each resolved bucket. The Battery line uses the final hourly state of charge in
+each bucket. The Net cost bars sum to the Projected cost summary. `Auto` uses the
+same date-range thresholds specified for the Historical view.
 
-The legend allows each of the five series to be hidden independently.
+The legend allows each of the six series to be hidden independently.
 
 The stable color mapping is:
 
@@ -531,10 +606,12 @@ The stable color mapping is:
 - Battery: violet `#7C3AED`.
 - Grid import: red `#DC2626`.
 - Grid export: green `#059669`.
+- Net cost: teal `#0F766E`.
 
-The application uses a wide page layout. Scalar controls live in the sidebar;
-the wider TOU table lives in the main content area. Streamlit's responsive
-layout handles narrower windows.
+The application uses a wide page layout. Analytical-view scalar controls live
+in the sidebar. Production scaling controls and the wider TOU table live in the
+Configuration page's main content area. Streamlit's responsive layout handles
+narrower windows.
 
 ## 14. Validation and Error Handling
 
@@ -554,7 +631,11 @@ Source data validation rejects:
 Model validation rejects:
 
 - Dates outside the available shared range.
-- Negative or non-finite solar scale, capacity, or power limits.
+- Nonpositive or non-finite reference annual production.
+- Negative or non-finite proposed annual production, solar scale, capacity, or
+  power limits.
+- Monthly scale profiles that do not contain exactly twelve finite,
+  nonnegative values.
 - Starting or reserve percentages outside 0 through 100.
 - Starting state of charge below reserve.
 - Round-trip efficiency outside `(0, 1]`.
@@ -565,8 +646,19 @@ Model validation rejects:
 - Imported energy without a matching utility price when calculating Projected
   cost.
 
-Errors appear in the page with concise context. Invalid model inputs prevent the
-model run but do not make valid historical data unavailable.
+Configuration validation rejects missing or unknown fields, unsupported schema
+versions, invalid section values, and invalid TOU semantic rows. A missing file
+uses defaults and permits later automatic saves. A malformed, unsupported, or
+unknown-field configuration file shows its path in a warning, uses defaults for
+that session, disables automatic saves, and is never overwritten.
+
+An invalid nonblank Solar or TOU editor value remains visible in the current
+session, shows concise row-specific context, and neither replaces the last
+valid saved section nor prevents a valid edit in another section from saving.
+If a write fails, the current in-session value remains usable and a save error
+with the configuration path remains visible until a later successful save clears
+it. Errors appear in the page with concise context. Invalid model inputs prevent
+the model run but do not make valid historical data unavailable.
 
 ## 15. Verification Requirements
 
@@ -595,6 +687,11 @@ Automated tests cover:
 - All-data, rolling seven-day, rolling one-month, and custom period selection,
   including previous/next navigation and clipped boundary periods.
 - Per-view export purchase defaults, persistence, and Projected cost response.
+- Local configuration path selection, schema validation, startup loading,
+  round-trip persistence, semantic TOU mapping, and atomic replacement.
+- Invalid configuration-file isolation, per-section persistence isolation,
+  visible save failures, invalid editor retention, and transient-view-state
+  exclusion.
 
 The complete suite runs with:
 
@@ -618,6 +715,8 @@ The application is conformant when:
 - Custom and preset battery settings produce the specified effective battery
   configuration and persist for the session.
 - TOU rules use configured prices and the specified seasonal classification.
+- The modeled Net cost chart has one signed bar per resolved bucket and sums to
+  the Projected cost summary.
 - Battery dispatch obeys reserve, capacity, efficiency, power, strategy, and
   solar-only charging rules.
 - Modeled charts and summary values use the specified signs, axes, traces, and

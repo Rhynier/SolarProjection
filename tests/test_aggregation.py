@@ -46,7 +46,7 @@ def test_weekly_buckets_start_on_monday():
     assert result.loc[0, "bucket_start"] == pd.Timestamp("2025-12-29")
 
 
-def test_model_aggregation_sums_energy_and_keeps_the_final_battery_level():
+def test_model_aggregation_sums_energy_and_net_cost_and_keeps_final_battery_level():
     result = pd.DataFrame({
         "timestamp": pd.to_datetime([
             "2026-01-01 00:00",
@@ -59,6 +59,7 @@ def test_model_aggregation_sums_energy_and_keeps_the_final_battery_level():
         "battery_soc_kwh": [5.0, 4.5, 6.0, 5.5],
         "grid_import_kwh": [0.5, 1.0, 1.5, 2.0],
         "grid_export_kwh": [0.0, 0.0, 0.5, 1.0],
+        "net_cost_usd": [0.05, 0.10, 0.12, -0.02],
     })
 
     aggregated, resolved = aggregation.aggregate_model_result(
@@ -74,4 +75,5 @@ def test_model_aggregation_sums_energy_and_keeps_the_final_battery_level():
     assert list(aggregated["modeled_solar_kwh"]) == [1.5, 3.5]
     assert list(aggregated["grid_import_kwh"]) == [1.5, 3.5]
     assert list(aggregated["grid_export_kwh"]) == [0.0, 1.5]
+    assert list(aggregated["net_cost_usd"]) == pytest.approx([0.15, 0.10])
     assert list(aggregated["battery_soc_kwh"]) == [4.5, 5.5]

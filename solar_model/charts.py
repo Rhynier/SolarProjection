@@ -9,6 +9,7 @@ SERIES_COLORS = {
     "Battery": "#7C3AED",
     "Grid import": "#DC2626",
     "Grid export": "#059669",
+    "Net cost": "#0F766E",
 }
 
 _HISTORY_COLUMNS = {
@@ -56,12 +57,16 @@ def build_history_figure(
 
 def build_model_figure(result: pd.DataFrame) -> go.Figure:
     figure = make_subplots(
-        rows=2,
+        rows=3,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.08,
-        row_heights=[0.72, 0.28],
-        specs=[[{"secondary_y": True}], [{"secondary_y": False}]],
+        vertical_spacing=0.06,
+        row_heights=[0.58, 0.24, 0.18],
+        specs=[
+            [{"secondary_y": True}],
+            [{"secondary_y": False}],
+            [{"secondary_y": False}],
+        ],
     )
     timestamps = result["bucket_start"]
     figure.add_bar(
@@ -106,12 +111,23 @@ def build_model_figure(result: pd.DataFrame) -> go.Figure:
         row=2,
         col=1,
     )
+    figure.add_bar(
+        name="Net cost",
+        x=timestamps,
+        y=result["net_cost_usd"],
+        marker_color=SERIES_COLORS["Net cost"],
+        row=3,
+        col=1,
+    )
     figure.update_yaxes(title_text="Energy (kWh)", row=1, col=1)
     figure.update_yaxes(
         title_text="Battery level (kWh)", row=1, col=1, secondary_y=True
     )
     figure.update_yaxes(title_text="Grid exchange (kWh)", row=2, col=1)
-    figure.update_xaxes(title_text="Time", row=2, col=1)
+    figure.update_yaxes(title_text="Net cost ($)", row=3, col=1)
+    figure.update_xaxes(title_text="Time", row=3, col=1)
     figure.add_hline(y=0, row=2, col=1, line_color="#475569")
+    figure.add_hline(y=0, row=3, col=1, line_color="#475569")
+    figure.update_layout(height=800)
     _transparent_layout(figure)
     return figure

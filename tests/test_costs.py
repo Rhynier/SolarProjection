@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 
+import solar_model.costs as costs
 from solar_model.costs import (
     CostValidationError,
     format_currency,
@@ -43,6 +44,48 @@ def test_projected_cost_uses_hourly_import_prices_and_export_credit():
     result = projected_utility_cost(hourly, rules, export_rate_per_kwh=0.10)
 
     assert result == pytest.approx(0.625)
+
+
+def test_hourly_net_costs_return_one_signed_value_per_hour_without_mutating_input():
+    hourly = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-05 16:00", "2026-01-05 17:00"]),
+            "grid_import_kwh": [2.0, 1.0],
+            "grid_export_kwh": [0.5, 0.25],
+        }
+    )
+    original_hourly = hourly.copy(deep=True)
+    rules = parse_tou_rules(
+        [
+            {
+                "Name": "Off-peak",
+                "Start date": "01-01",
+                "End date": "12-31",
+                "Weekdays": "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
+                "Start time": "00:00",
+                "End time": "17:00",
+                "Price ($/kWh)": "0.15",
+            },
+            {
+                "Name": "Peak",
+                "Start date": "01-01",
+                "End date": "12-31",
+                "Weekdays": "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
+                "Start time": "17:00",
+                "End time": "00:00",
+                "Price ($/kWh)": "0.40",
+            },
+        ]
+    )
+
+    result = costs.hourly_net_costs(hourly, rules, export_rate_per_kwh=0.10)
+
+    assert result.name == "net_cost_usd"
+    assert list(result) == pytest.approx([0.25, 0.375])
+    assert result.sum() == pytest.approx(
+        projected_utility_cost(hourly, rules, export_rate_per_kwh=0.10)
+    )
+    pd.testing.assert_frame_equal(hourly, original_hourly)
 
 
 def test_projected_cost_rejects_imported_energy_without_a_utility_price():

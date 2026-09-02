@@ -155,6 +155,50 @@ def test_zero_capacity_battery_keeps_surplus_on_the_grid():
     assert result.loc[0, "grid_export_kwh"] == pytest.approx(1.0)
 
 
+def test_monthly_solar_scales_apply_by_calendar_month():
+    result = simulate(
+        frame(
+            [0.0, 0.0],
+            [1.0, 1.0],
+            start="2026-01-31 23:00",
+        ),
+        SimulationConfig(
+            1.0,
+            battery(capacity_kwh=0.0, starting_percent=0.0, reserve_percent=0.0),
+            "self_consumption",
+            monthly_solar_scales=(2.0, 3.0) + (1.0,) * 10,
+        ),
+        [],
+    )
+
+    assert list(result["modeled_solar_kwh"]) == pytest.approx([2.0, 3.0])
+
+
+@pytest.mark.parametrize(
+    ("monthly_scales", "message"),
+    [
+        ((1.0,) * 11, "must contain 12 values"),
+        ((-1.0,) + (1.0,) * 11, "must contain finite nonnegative values"),
+        ((float("inf"),) + (1.0,) * 11, "must contain finite nonnegative values"),
+    ],
+)
+def test_monthly_solar_scales_require_twelve_finite_nonnegative_values(
+    monthly_scales,
+    message,
+):
+    with pytest.raises(SimulationValidationError, match=message):
+        simulate(
+            frame([0.0], [0.0]),
+            SimulationConfig(
+                1.0,
+                battery(),
+                "self_consumption",
+                monthly_solar_scales=monthly_scales,
+            ),
+            [],
+        )
+
+
 @pytest.mark.parametrize("config", [
     SimulationConfig(-1.0, battery(), "self_consumption"),
     SimulationConfig(float("inf"), battery(), "self_consumption"),
