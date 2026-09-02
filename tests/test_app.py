@@ -11,6 +11,19 @@ from streamlit.proto.WidgetStates_pb2 import WidgetState
 from streamlit.testing.v1 import AppTest
 
 
+@pytest.fixture(autouse=True)
+def isolate_user_configuration(monkeypatch, tmp_path):
+    path = tmp_path / ".home-energy-model" / "config.json"
+    monkeypatch.setenv("HOME_ENERGY_MODEL_CONFIG_PATH", str(path))
+    return path
+
+
+def _new_app() -> AppTest:
+    return AppTest.from_file(
+        Path(__file__).parents[1] / "app.py", default_timeout=30
+    ).run()
+
+
 def _number_input(app: AppTest, label: str):
     return next(widget for widget in app.number_input if widget.label == label)
 
@@ -91,9 +104,12 @@ def _edit_data_editor(app: AppTest, row: int, column: str, value: object) -> App
     return _edit_data_editor_rows(app, {row: {column: value}})
 
 
-def test_app_starts_against_supplied_csvs_without_exceptions():
-    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+def test_app_starts_against_supplied_csvs_without_exceptions(
+    isolate_user_configuration,
+):
+    app = _new_app()
     assert not app.exception
+    assert not isolate_user_configuration.exists()
     assert app.title[0].value == "Home Energy Model"
     assert app.radio[0].options == [
         "Historical view",
@@ -782,6 +798,56 @@ def test_each_view_has_a_persisted_export_purchase_rate_default():
     assert _number_input(
         app, "Utility purchase rate for exported energy ($/kWh)"
     ).value == pytest.approx(0.11)
+
+
+def test_export_rates_persist_across_fresh_sessions(isolate_user_configuration):
+    first = _new_app()
+    _number_input(
+        first, "Utility purchase rate for exported energy ($/kWh)"
+    ).set_value(0.07).run()
+    first.radio[0].set_value("System model").run()
+    _number_input(
+        first, "Utility purchase rate for exported energy ($/kWh)"
+    ).set_value(0.11).run()
+    assert isolate_user_configuration.exists()
+
+    second = _new_app()
+    assert _number_input(
+        second, "Utility purchase rate for exported energy ($/kWh)"
+    ).value == pytest.approx(0.07)
+    second.radio[0].set_value("System model").run()
+    assert _number_input(
+        second, "Utility purchase rate for exported energy ($/kWh)"
+    ).value == pytest.approx(0.11)
+
+
+def test_all_battery_settings_persist_across_fresh_sessions():
+    first = _new_app()
+    first.radio[0].set_value("System model").run()
+    _selectbox(first, "Battery strategy").set_value("TOU reserve").run()
+    _number_input(first, "Starting charge (%)").set_value(80.0).run()
+    _number_input(first, "Minimum reserve (%)").set_value(25.0).run()
+    _number_input(first, "Battery usable capacity (kWh)").set_value(18.0).run()
+    _number_input(first, "Round-trip efficiency (%)").set_value(86.0).run()
+    _number_input(first, "Maximum charge power (kW)").set_value(4.5).run()
+    _number_input(first, "Maximum discharge power (kW)").set_value(8.5).run()
+    _radio(first, "Battery settings").set_value("Battery preset").run()
+    _selectbox(first, "Battery model").set_value("Enphase IQ Battery 10C").run()
+    _number_input(first, "Number of batteries").set_value(2).run()
+
+    second = _new_app()
+    second.radio[0].set_value("System model").run()
+    assert _selectbox(second, "Battery strategy").value == "TOU reserve"
+    assert _number_input(second, "Starting charge (%)").value == 80.0
+    assert _number_input(second, "Minimum reserve (%)").value == 25.0
+    assert _radio(second, "Battery settings").value == "Battery preset"
+    assert _selectbox(second, "Battery model").value == "Enphase IQ Battery 10C"
+    assert _number_input(second, "Number of batteries").value == 2
+    _radio(second, "Battery settings").set_value("Custom values").run()
+    assert _number_input(second, "Battery usable capacity (kWh)").value == 18.0
+    assert _number_input(second, "Round-trip efficiency (%)").value == 86.0
+    assert _number_input(second, "Maximum charge power (kW)").value == 4.5
+    assert _number_input(second, "Maximum discharge power (kW)").value == 8.5
 
 
 def test_historical_projected_cost_uses_the_configured_export_purchase_rate():

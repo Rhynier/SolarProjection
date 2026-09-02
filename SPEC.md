@@ -359,8 +359,13 @@ values, common battery values, shared TOU edits, and the independent Historical
 and System-model export purchase rates must survive navigation between all
 three pages during the current Streamlit session.
 
-All session settings reset when the application process restarts. No settings
-are written to disk.
+All settings listed above survive navigation between the application's pages
+during the current Streamlit session. The independent Historical and
+System-model export purchase rates, and every battery strategy, mode, preset,
+quantity, common, and custom setting, also persist across fresh sessions in
+the local user configuration. A new installation continues to use the listed
+defaults and does not create a configuration file until the user changes one
+of those persisted settings.
 
 ## 10. Time-of-Use Rules
 

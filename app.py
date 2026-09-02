@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import date
 from math import isfinite
 from pathlib import Path
@@ -12,6 +13,14 @@ from solar_model.costs import (
     format_currency,
     hourly_net_costs,
     projected_utility_cost,
+)
+from solar_model.configuration import (
+    ConfigurationError,
+    ConfigurationValidationError,
+    configuration_path,
+    load_configuration,
+    save_configuration,
+    validate_configuration,
 )
 from solar_model.data import DataValidationError, load_hourly_energy
 from solar_model.periods import (
@@ -83,6 +92,11 @@ BATTERY_PRESETS = {
         "max_discharge_kw": 7.08,
     },
 }
+CONFIG_DOCUMENT_KEY = "_configuration.document"
+CONFIG_PATH_KEY = "_configuration.path"
+CONFIG_AUTOSAVE_KEY = "_configuration.autosave_enabled"
+CONFIG_WARNING_KEY = "_configuration.warning"
+CONFIG_ERROR_KEY = "_configuration.error"
 
 
 @st.cache_data(show_spinner="Loading energy history…")
@@ -227,7 +241,9 @@ def render_history(hourly: pd.DataFrame) -> None:
     visible_series = st.sidebar.multiselect(
         "Series", HISTORY_SERIES, default=HISTORY_SERIES
     )
-    export_rate = _export_purchase_rate_input("history_export_rate", 0.0563)
+    export_rate = _export_purchase_rate_input(
+        "history_export_rate", 0.0563, "historical"
+    )
 
     if not isinstance(selected_dates, tuple) or len(selected_dates) != 2:
         st.error("Choose both a start and end date.")
@@ -328,6 +344,192 @@ def _model_widget_key(name: str) -> str:
     return f"{MODEL_WIDGET_PREFIX}{name}"
 
 
+def _apply_configuration(document: dict[str, object]) -> None:
+    historical = document["historical"]
+    system_model = document["system_model"]
+    battery = document["battery"]
+    solar_production = document["solar_production"]
+    time_of_use = document["time_of_use"]
+
+    st.session_state[_model_state_key("history_export_rate")] = historical[
+        "export_purchase_rate_per_kwh"
+    ]
+    st.session_state[_model_state_key("system_export_rate")] = system_model[
+        "export_purchase_rate_per_kwh"
+    ]
+    st.session_state[_model_state_key("strategy")] = battery["strategy"]
+    st.session_state[_model_state_key("battery_settings")] = battery["settings_mode"]
+    st.session_state[_model_state_key("starting_percent")] = battery[
+        "starting_charge_percent"
+    ]
+    st.session_state[_model_state_key("reserve_percent")] = battery[
+        "minimum_reserve_percent"
+    ]
+    st.session_state[_model_state_key("battery_model")] = battery["preset"]["model"]
+    st.session_state[_model_state_key("battery_count")] = battery["preset"]["quantity"]
+    st.session_state[_model_state_key("capacity")] = battery["custom"][
+        "usable_capacity_kwh"
+    ]
+    st.session_state[_model_state_key("round_trip_percent")] = battery["custom"][
+        "round_trip_efficiency_percent"
+    ]
+    st.session_state[_model_state_key("max_charge_kw")] = battery["custom"][
+        "maximum_charge_power_kw"
+    ]
+    st.session_state[_model_state_key("max_discharge_kw")] = battery["custom"][
+        "maximum_discharge_power_kw"
+    ]
+    st.session_state[_model_state_key("production_scaling")] = solar_production[
+        "scaling_mode"
+    ]
+    st.session_state[_model_state_key("reference_production_kwh")] = solar_production[
+        "annual"
+    ]["reference_kwh"]
+    st.session_state[_model_state_key("proposed_production_kwh")] = solar_production[
+        "annual"
+    ]["proposed_kwh"]
+    st.session_state[_model_state_key("monthly_production")] = pd.DataFrame(
+        [
+            {
+                "Month": row["month"],
+                MONTHLY_REFERENCE_COLUMN: row["reference_kwh"],
+                MONTHLY_PROPOSED_COLUMN: row["proposed_kwh"],
+            }
+            for row in solar_production["monthly"]
+        ],
+        columns=["Month", MONTHLY_REFERENCE_COLUMN, MONTHLY_PROPOSED_COLUMN],
+    )
+    st.session_state[_shared_state_key("tou_rules")] = pd.DataFrame(
+        [
+            {
+                "Name": row["name"],
+                "Start date": row["start_date"],
+                "End date": row["end_date"],
+                "Weekdays": row["weekdays"],
+                "Start time": row["start_time"],
+                "End time": row["end_time"],
+                "Price ($/kWh)": row["price_per_kwh"],
+            }
+            for row in time_of_use["rules"]
+        ],
+        columns=TOU_COLUMNS,
+    )
+
+
+def _initialize_configuration() -> None:
+    if CONFIG_DOCUMENT_KEY in st.session_state:
+        return
+    path = configuration_path()
+    loaded = load_configuration(path)
+    document = deepcopy(loaded.document)
+    st.session_state[CONFIG_PATH_KEY] = path
+    st.session_state[CONFIG_DOCUMENT_KEY] = document
+    st.session_state[CONFIG_AUTOSAVE_KEY] = loaded.autosave_enabled
+    st.session_state[CONFIG_WARNING_KEY] = loaded.warning
+    st.session_state[CONFIG_ERROR_KEY] = None
+    _apply_configuration(document)
+
+
+def _configuration_section_from_state(section: str) -> dict[str, object]:
+    if section == "historical":
+        return {
+            "export_purchase_rate_per_kwh": float(
+                st.session_state[_model_state_key("history_export_rate")]
+            )
+        }
+    if section == "system_model":
+        return {
+            "export_purchase_rate_per_kwh": float(
+                st.session_state[_model_state_key("system_export_rate")]
+            )
+        }
+    if section == "battery":
+        return {
+            "strategy": st.session_state[_model_state_key("strategy")],
+            "settings_mode": st.session_state[_model_state_key("battery_settings")],
+            "starting_charge_percent": float(
+                st.session_state[_model_state_key("starting_percent")]
+            ),
+            "minimum_reserve_percent": float(
+                st.session_state[_model_state_key("reserve_percent")]
+            ),
+            "preset": {
+                "model": st.session_state[_model_state_key("battery_model")],
+                "quantity": int(st.session_state[_model_state_key("battery_count")]),
+            },
+            "custom": {
+                "usable_capacity_kwh": float(
+                    st.session_state[_model_state_key("capacity")]
+                ),
+                "round_trip_efficiency_percent": float(
+                    st.session_state[_model_state_key("round_trip_percent")]
+                ),
+                "maximum_charge_power_kw": float(
+                    st.session_state[_model_state_key("max_charge_kw")]
+                ),
+                "maximum_discharge_power_kw": float(
+                    st.session_state[_model_state_key("max_discharge_kw")]
+                ),
+            },
+        }
+    if section == "solar_production":
+        monthly = st.session_state[_model_state_key("monthly_production")]
+        return {
+            "scaling_mode": st.session_state[_model_state_key("production_scaling")],
+            "annual": {
+                "reference_kwh": float(
+                    st.session_state[_model_state_key("reference_production_kwh")]
+                ),
+                "proposed_kwh": float(
+                    st.session_state[_model_state_key("proposed_production_kwh")]
+                ),
+            },
+            "monthly": [
+                {
+                    "month": str(row["Month"]),
+                    "reference_kwh": float(row[MONTHLY_REFERENCE_COLUMN]),
+                    "proposed_kwh": float(row[MONTHLY_PROPOSED_COLUMN]),
+                }
+                for row in monthly.to_dict("records")
+            ],
+        }
+    if section == "time_of_use":
+        rules = st.session_state[_shared_state_key("tou_rules")]
+        return {
+            "rules": [
+                {
+                    "name": str(row["Name"]),
+                    "start_date": str(row["Start date"]),
+                    "end_date": str(row["End date"]),
+                    "weekdays": str(row["Weekdays"]),
+                    "start_time": str(row["Start time"]),
+                    "end_time": str(row["End time"]),
+                    "price_per_kwh": float(row["Price ($/kWh)"]),
+                }
+                for row in rules.to_dict("records")
+            ]
+        }
+    raise ValueError(f"Unsupported configuration section {section!r}")
+
+
+def _persist_configuration_section(section: str) -> bool:
+    if not st.session_state[CONFIG_AUTOSAVE_KEY]:
+        return False
+    candidate = deepcopy(st.session_state[CONFIG_DOCUMENT_KEY])
+    candidate[section] = _configuration_section_from_state(section)
+    try:
+        normalized = validate_configuration(candidate)
+        saved = save_configuration(st.session_state[CONFIG_PATH_KEY], normalized)
+    except ConfigurationValidationError:
+        return False
+    except ConfigurationError as error:
+        st.session_state[CONFIG_ERROR_KEY] = str(error)
+        return False
+    st.session_state[CONFIG_DOCUMENT_KEY] = saved
+    st.session_state[CONFIG_ERROR_KEY] = None
+    return True
+
+
 def _model_value(name: str, default: object) -> object:
     state_key = _model_state_key(name)
     if state_key not in st.session_state:
@@ -335,13 +537,25 @@ def _model_value(name: str, default: object) -> object:
     return st.session_state[state_key]
 
 
-def _store_model_value(name: str) -> None:
+def _store_model_value(name: str, section: str | None = None) -> None:
     st.session_state[_model_state_key(name)] = st.session_state[
         _model_widget_key(name)
     ]
+    if section is not None:
+        _persist_configuration_section(section)
 
 
-def _export_purchase_rate_input(name: str, default: float) -> float:
+def _store_annual_production_value(name: str) -> None:
+    _store_model_value(name)
+    st.session_state[_model_state_key("monthly_production")] = (
+        _monthly_production_defaults(
+            float(st.session_state[_model_state_key("reference_production_kwh")]),
+            float(st.session_state[_model_state_key("proposed_production_kwh")]),
+        )
+    )
+
+
+def _export_purchase_rate_input(name: str, default: float, section: str) -> float:
     return st.sidebar.number_input(
         "Utility purchase rate for exported energy ($/kWh)",
         min_value=0.0,
@@ -350,7 +564,7 @@ def _export_purchase_rate_input(name: str, default: float) -> float:
         format="%.4f",
         key=_model_widget_key(name),
         on_change=_store_model_value,
-        args=(name,),
+        args=(name, section),
     )
 
 
@@ -508,7 +722,7 @@ def _render_production_scaling_configuration() -> None:
             step=0.01,
             format="%.2f",
             key=_model_widget_key("reference_production_kwh"),
-            on_change=_store_model_value,
+            on_change=_store_annual_production_value,
             args=("reference_production_kwh",),
         )
         proposed_production_kwh = st.number_input(
@@ -518,7 +732,7 @@ def _render_production_scaling_configuration() -> None:
             step=0.01,
             format="%.2f",
             key=_model_widget_key("proposed_production_kwh"),
-            on_change=_store_model_value,
+            on_change=_store_annual_production_value,
             args=("proposed_production_kwh",),
         )
     else:
@@ -583,7 +797,9 @@ def render_model(hourly: pd.DataFrame) -> None:
     except ValueError as error:
         st.sidebar.error(f"Monthly production is invalid: {error}")
         return
-    export_rate = _export_purchase_rate_input("system_export_rate", 0.096)
+    export_rate = _export_purchase_rate_input(
+        "system_export_rate", 0.096, "system_model"
+    )
     if monthly_solar_scales is None:
         st.sidebar.caption(f"Production scale: {solar_scale:.3f}×")
     else:
@@ -596,7 +812,7 @@ def render_model(hourly: pd.DataFrame) -> None:
         ),
         key=_model_widget_key("strategy"),
         on_change=_store_model_value,
-        args=("strategy",),
+        args=("strategy", "battery"),
     )
     starting_percent = st.sidebar.number_input(
         "Starting charge (%)",
@@ -606,7 +822,7 @@ def render_model(hourly: pd.DataFrame) -> None:
         step=1.0,
         key=_model_widget_key("starting_percent"),
         on_change=_store_model_value,
-        args=("starting_percent",),
+        args=("starting_percent", "battery"),
     )
     reserve_percent = st.sidebar.number_input(
         "Minimum reserve (%)",
@@ -616,7 +832,7 @@ def render_model(hourly: pd.DataFrame) -> None:
         step=1.0,
         key=_model_widget_key("reserve_percent"),
         on_change=_store_model_value,
-        args=("reserve_percent",),
+        args=("reserve_percent", "battery"),
     )
     battery_settings = st.sidebar.radio(
         "Battery settings",
@@ -626,7 +842,7 @@ def render_model(hourly: pd.DataFrame) -> None:
         ),
         key=_model_widget_key("battery_settings"),
         on_change=_store_model_value,
-        args=("battery_settings",),
+        args=("battery_settings", "battery"),
     )
     if battery_settings == "Custom values":
         capacity = st.sidebar.number_input(
@@ -636,7 +852,7 @@ def render_model(hourly: pd.DataFrame) -> None:
             step=0.5,
             key=_model_widget_key("capacity"),
             on_change=_store_model_value,
-            args=("capacity",),
+            args=("capacity", "battery"),
         )
         preset = None
     else:
@@ -648,7 +864,7 @@ def render_model(hourly: pd.DataFrame) -> None:
             ),
             key=_model_widget_key("battery_model"),
             on_change=_store_model_value,
-            args=("battery_model",),
+            args=("battery_model", "battery"),
         )
         battery_count = st.sidebar.number_input(
             "Number of batteries",
@@ -657,7 +873,7 @@ def render_model(hourly: pd.DataFrame) -> None:
             step=1,
             key=_model_widget_key("battery_count"),
             on_change=_store_model_value,
-            args=("battery_count",),
+            args=("battery_count", "battery"),
         )
         preset = BATTERY_PRESETS[battery_model]
         with st.sidebar:
@@ -676,7 +892,7 @@ def render_model(hourly: pd.DataFrame) -> None:
                 step=1.0,
                 key=_model_widget_key("round_trip_percent"),
                 on_change=_store_model_value,
-                args=("round_trip_percent",),
+                args=("round_trip_percent", "battery"),
             )
             max_charge_kw = st.number_input(
                 "Maximum charge power (kW)",
@@ -685,7 +901,7 @@ def render_model(hourly: pd.DataFrame) -> None:
                 step=0.5,
                 key=_model_widget_key("max_charge_kw"),
                 on_change=_store_model_value,
-                args=("max_charge_kw",),
+                args=("max_charge_kw", "battery"),
             )
             max_discharge_kw = st.number_input(
                 "Maximum discharge power (kW)",
@@ -694,7 +910,7 @@ def render_model(hourly: pd.DataFrame) -> None:
                 step=0.5,
                 key=_model_widget_key("max_discharge_kw"),
                 on_change=_store_model_value,
-                args=("max_discharge_kw",),
+                args=("max_discharge_kw", "battery"),
             )
         else:
             round_trip_percent = _readonly_preset_value(
@@ -775,7 +991,12 @@ def render_model(hourly: pd.DataFrame) -> None:
 
 
 st.set_page_config(page_title="Home Energy Model", page_icon="☀️", layout="wide")
+_initialize_configuration()
 st.title("Home Energy Model")
+if st.session_state[CONFIG_WARNING_KEY] is not None:
+    st.warning(st.session_state[CONFIG_WARNING_KEY])
+if st.session_state[CONFIG_ERROR_KEY] is not None:
+    st.error(st.session_state[CONFIG_ERROR_KEY])
 
 try:
     hourly = load_data()
