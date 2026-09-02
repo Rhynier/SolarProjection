@@ -239,18 +239,22 @@ resolution.
 
 ### 9.1 Period and solar controls
 
-The sidebar provides:
+The System model sidebar provides:
 
 - The same `Custom`, `Week`, `Month`, and `All` period selector used by the
   Historical view.
 - The same `Auto`, `Hour`, `Day`, `Week`, or `Month` aggregation selector used
   by the Historical view.
+- Utility purchase rate for exported energy, defaulting to `$0.0960/kWh`.
+
+The Configuration page contains a `Solar production scaling` section before
+the `Time-of-use rules` section. The production-scaling section provides:
+
 - An `Annual` or `Monthly` production-scaling mode, defaulting to `Annual`.
 - Reference annual solar production in kWh, which must be greater than zero in
   Annual mode.
 - Proposed-system annual solar production in kWh, which must be nonnegative in
   Annual mode.
-- Utility purchase rate for exported energy, defaulting to `$0.0960/kWh`.
 - The calculated annual production scale:
 
 ```text
@@ -281,6 +285,10 @@ totals ratio as an applied scale. Annual and Monthly values remain independent:
 returning to Annual mode restores the prior editable Annual-mode values, and
 returning to Monthly mode restores the prior monthly values.
 
+The System model does not repeat the editable production controls. Its sidebar
+shows a read-only summary of the active annual scale or states that monthly
+calendar scales are active.
+
 The period type, resulting date range, and aggregation value remain synchronized
 between views. Their defaults are `Custom`, the first available inclusive
 one-month range, and `Auto`. Annual-mode reference and proposed production both
@@ -296,6 +304,15 @@ The strategy choices are:
 - `TOU reserve`
 
 Self-consumption is the default.
+
+Immediately below the Battery strategy selector, the sidebar provides:
+
+- Starting state of charge from 0 through 100 percent, default 50 percent.
+- Minimum reserve from 0 through 100 percent, default 10 percent.
+
+Starting state of charge must not be below the reserve. These controls appear
+before the Battery settings mode selector and remain editable in both battery
+settings modes.
 
 ### 9.3 Battery settings modes
 
@@ -326,14 +343,12 @@ efficiency does not scale. Preset-derived fields are read-only.
 Switching between custom and preset modes must preserve the user's custom
 values for the current session.
 
-### 9.4 Common battery controls
+### 9.4 Advanced battery settings
 
-Both battery modes provide:
-
-- Starting state of charge from 0 through 100 percent, default 50 percent.
-- Minimum reserve from 0 through 100 percent, default 10 percent.
-
-Starting state of charge must not be below the reserve.
+The Advanced battery settings expander contains round-trip efficiency and the
+maximum AC-side charge and discharge power. These values are editable in Custom
+values mode and read-only nameplate values in Battery preset mode. Starting
+charge and Minimum reserve are not advanced settings.
 
 ### 9.5 Session behavior
 
@@ -349,9 +364,9 @@ are written to disk.
 
 ## 10. Time-of-Use Rules
 
-The Configuration page contains the shared Time-of-use rules editor. Historical
-cost calculation and System-model simulation and cost calculation use the same
-configured rules.
+The Configuration page contains the shared Time-of-use rules editor immediately
+after the Solar production scaling section. Historical cost calculation and
+System-model simulation and cost calculation use the same configured rules.
 
 ### 10.1 Editor schema
 
@@ -572,9 +587,10 @@ The stable color mapping is:
 - Grid export: green `#059669`.
 - Net cost: teal `#0F766E`.
 
-The application uses a wide page layout. Scalar controls live in the sidebar;
-the wider TOU table lives in the Configuration page's main content area.
-Streamlit's responsive layout handles narrower windows.
+The application uses a wide page layout. Analytical-view scalar controls live
+in the sidebar. Production scaling controls and the wider TOU table live in the
+Configuration page's main content area. Streamlit's responsive layout handles
+narrower windows.
 
 ## 14. Validation and Error Handling
 

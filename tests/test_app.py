@@ -289,18 +289,22 @@ def test_system_model_derives_solar_scale_from_annual_production():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
     app.radio[0].set_value("System model").run()
 
-    reference = _number_input(app, "Reference annual production (kWh)")
-    proposed = _number_input(app, "Proposed annual production (kWh)")
-    assert reference.value == pytest.approx(2017.56)
-    assert proposed.value == pytest.approx(2017.56)
-
     initial_figure = pio.from_json(app.get("plotly_chart")[0].proto.spec)
     initial_production = next(
         trace for trace in initial_figure.data if trace.name == "Production"
     )
 
+    app.radio[0].set_value("Configuration").run()
+
+    reference = _number_input(app, "Reference annual production (kWh)")
+    proposed = _number_input(app, "Proposed annual production (kWh)")
+    assert reference.value == pytest.approx(2017.56)
+    assert proposed.value == pytest.approx(2017.56)
+
     reference.set_value(1000.0).run()
     _number_input(app, "Proposed annual production (kWh)").set_value(2000.0).run()
+
+    app.radio[0].set_value("System model").run()
 
     updated_figure = pio.from_json(app.get("plotly_chart")[0].proto.spec)
     updated_production = next(
@@ -316,16 +320,17 @@ def test_system_model_derives_solar_scale_from_annual_production():
     app.radio[0].set_value("Historical view").run()
     app.radio[0].set_value("System model").run()
 
-    assert _number_input(app, "Reference annual production (kWh)").value == 1000.0
-    assert _number_input(app, "Proposed annual production (kWh)").value == 2000.0
     assert any(
         caption.value == "Production scale: 2.000×" for caption in app.caption
     )
+    app.radio[0].set_value("Configuration").run()
+    assert _number_input(app, "Reference annual production (kWh)").value == 1000.0
+    assert _number_input(app, "Proposed annual production (kWh)").value == 2000.0
 
 
 def test_monthly_scaling_initializes_from_retained_annual_values():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
-    app.radio[0].set_value("System model").run()
+    app.radio[0].set_value("Configuration").run()
     _number_input(app, "Reference annual production (kWh)").set_value(1200.0).run()
     _number_input(app, "Proposed annual production (kWh)").set_value(2400.0).run()
 
@@ -369,7 +374,7 @@ def test_monthly_scaling_initializes_from_retained_annual_values():
 
 def test_monthly_initialization_uses_displayed_precision_without_hidden_values():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
-    app.radio[0].set_value("System model").run()
+    app.radio[0].set_value("Configuration").run()
     _number_input(app, "Reference annual production (kWh)").set_value(1000.0).run()
     _number_input(app, "Proposed annual production (kWh)").set_value(1000.0).run()
 
@@ -389,7 +394,7 @@ def test_monthly_initialization_uses_displayed_precision_without_hidden_values()
 
 def test_monthly_initialization_supports_the_smallest_annual_reference():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
-    app.radio[0].set_value("System model").run()
+    app.radio[0].set_value("Configuration").run()
     _number_input(app, "Reference annual production (kWh)").set_value(0.01).run()
     _number_input(app, "Proposed annual production (kWh)").set_value(0.0).run()
 
@@ -406,7 +411,7 @@ def test_monthly_initialization_supports_the_smallest_annual_reference():
 
 def test_annual_scaling_values_survive_a_monthly_round_trip():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
-    app.radio[0].set_value("System model").run()
+    app.radio[0].set_value("Configuration").run()
     _number_input(app, "Reference annual production (kWh)").set_value(1200.0).run()
     _number_input(app, "Proposed annual production (kWh)").set_value(2400.0).run()
     _radio(app, "Production scaling").set_value("Monthly").run()
@@ -436,8 +441,11 @@ def test_monthly_scaling_editor_applies_the_selected_month_factor():
         trace for trace in initial_figure.data if trace.name == "Production"
     )
 
+    app.radio[0].set_value("Configuration").run()
     _radio(app, "Production scaling").set_value("Monthly").run()
     app = _edit_data_editor(app, 0, "Proposed production (kWh)", 336.26)
+
+    app.radio[0].set_value("System model").run()
 
     updated_figure = pio.from_json(app.get("plotly_chart")[0].proto.spec)
     updated_production = next(
@@ -466,7 +474,7 @@ def test_monthly_scaling_rejects_blank_cells_with_a_month_specific_error(
     message,
 ):
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
-    app.radio[0].set_value("System model").run()
+    app.radio[0].set_value("Configuration").run()
     _radio(app, "Production scaling").set_value("Monthly").run()
 
     app = _edit_data_editor(app, 0, column, None)
@@ -474,10 +482,16 @@ def test_monthly_scaling_rejects_blank_cells_with_a_month_specific_error(
     assert not app.exception
     assert any(message in error.value for error in app.error)
 
+    app.radio[0].set_value("System model").run()
+
+    assert not app.exception
+    assert any(message in error.value for error in app.error)
+    assert not app.get("plotly_chart")
+
 
 def test_monthly_scaling_all_blank_references_do_not_crash():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
-    app.radio[0].set_value("System model").run()
+    app.radio[0].set_value("Configuration").run()
     _radio(app, "Production scaling").set_value("Monthly").run()
 
     app = _edit_data_editor_rows(
@@ -533,6 +547,40 @@ def test_battery_preset_scales_nameplate_values_by_quantity(
         assert widget.value == expected
         assert widget.disabled
     assert _number_input(app.sidebar, "Battery usable capacity (kWh)").value == capacity
+
+
+def test_charge_and_reserve_controls_are_grouped_with_battery_strategy():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    app.radio[0].set_value("System model").run()
+
+    sidebar_labels = [
+        getattr(element, "label", None)
+        for element in app.sidebar.children.values()
+    ]
+    assert sidebar_labels.index("Battery strategy") < sidebar_labels.index(
+        "Starting charge (%)"
+    )
+    assert sidebar_labels.index("Starting charge (%)") < sidebar_labels.index(
+        "Minimum reserve (%)"
+    )
+    assert sidebar_labels.index("Minimum reserve (%)") < sidebar_labels.index(
+        "Battery settings"
+    )
+
+    advanced = next(
+        element
+        for element in app.sidebar.children.values()
+        if getattr(element, "label", None) == "Advanced battery settings"
+    )
+    advanced_labels = [
+        getattr(element, "label", None) for element in advanced.children.values()
+    ]
+    assert advanced_labels == [
+        "Round-trip efficiency (%)",
+        "Maximum charge power (kW)",
+        "Maximum discharge power (kW)",
+    ]
 
 
 def test_battery_preset_selection_survives_a_history_round_trip():
@@ -614,6 +662,37 @@ def test_time_of_use_editor_is_only_shown_on_the_configuration_page():
     app.radio[0].set_value("Configuration").run()
 
     assert "Time-of-use rules" in [item.value for item in app.subheader]
+    assert not app.exception
+
+
+def test_production_scaling_editor_is_only_shown_on_configuration_before_tou():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    assert "Production scaling" not in [item.label for item in app.radio]
+
+    app.radio[0].set_value("System model").run()
+
+    assert "Production scaling" not in [item.label for item in app.radio]
+    assert "Reference annual production (kWh)" not in [
+        item.label for item in app.number_input
+    ]
+    assert any(
+        caption.value == "Production scale: 1.000×" for caption in app.caption
+    )
+
+    app.radio[0].set_value("Configuration").run()
+
+    assert [item.value for item in app.subheader][:2] == [
+        "Solar production scaling",
+        "Time-of-use rules",
+    ]
+    assert _radio(app, "Production scaling").value == "Annual"
+    assert _number_input(app, "Reference annual production (kWh)").value == pytest.approx(
+        2017.56
+    )
+    assert _number_input(app, "Proposed annual production (kWh)").value == pytest.approx(
+        2017.56
+    )
     assert not app.exception
 
 
@@ -723,8 +802,9 @@ def test_historical_projected_cost_uses_the_configured_export_purchase_rate():
 def test_system_model_projected_cost_uses_the_configured_export_purchase_rate():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
 
-    app.radio[0].set_value("System model").run()
+    app.radio[0].set_value("Configuration").run()
     _number_input(app, "Proposed annual production (kWh)").set_value(201756.0).run()
+    app.radio[0].set_value("System model").run()
     initial_cost = _currency_value(_metric(app, "Projected cost").value)
     exported_kwh = _energy_value(_metric(app, "Grid export").value)
     _number_input(

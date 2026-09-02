@@ -293,6 +293,8 @@ def _configured_tou_rules() -> list[TouRule]:
 
 
 def render_configuration() -> None:
+    _render_production_scaling_configuration()
+
     st.subheader("Time-of-use rules")
     st.caption(
         "SMUD Time-of-Day rates are preloaded. Dates use MM-DD; weekdays use "
@@ -364,10 +366,10 @@ def _readonly_preset_value(label: str, name: str, value: float) -> float:
     )
 
 
-def _readonly_model_value(label: str, name: str, value: float) -> float:
+def _readonly_configuration_value(label: str, name: str, value: float) -> float:
     widget_key = _model_widget_key(f"readonly_{name}")
     st.session_state[widget_key] = float(value)
-    return st.sidebar.number_input(
+    return st.number_input(
         label,
         min_value=0.0,
         step=0.01,
@@ -438,7 +440,7 @@ def _monthly_production_input(
     display["Scale"] = (proposed_values / reference_values).where(
         reference_values > 0
     )
-    edited = st.sidebar.data_editor(
+    edited = st.data_editor(
         display,
         hide_index=True,
         width="stretch",
@@ -482,14 +484,9 @@ def _monthly_production_input(
     return reference_total, proposed_total, monthly_scales
 
 
-def render_model(hourly: pd.DataFrame) -> None:
-    selected_dates = _date_range_input(hourly)
-    bucket_label = _aggregation_input()
-    if not isinstance(selected_dates, tuple) or len(selected_dates) != 2:
-        st.error("Choose both a start and end date.")
-        return
-    start_date, end_date = selected_dates
-    scaling_mode = st.sidebar.radio(
+def _render_production_scaling_configuration() -> None:
+    st.subheader("Solar production scaling")
+    scaling_mode = st.radio(
         "Production scaling",
         ["Annual", "Monthly"],
         index=["Annual", "Monthly"].index(
@@ -504,7 +501,7 @@ def render_model(hourly: pd.DataFrame) -> None:
     annual_proposed_kwh = float(_model_value("proposed_production_kwh", 2017.56))
     monthly_solar_scales = None
     if scaling_mode == "Annual":
-        reference_production_kwh = st.sidebar.number_input(
+        reference_production_kwh = st.number_input(
             "Reference annual production (kWh)",
             min_value=0.01,
             value=annual_reference_kwh,
@@ -514,7 +511,7 @@ def render_model(hourly: pd.DataFrame) -> None:
             on_change=_store_model_value,
             args=("reference_production_kwh",),
         )
-        proposed_production_kwh = st.sidebar.number_input(
+        proposed_production_kwh = st.number_input(
             "Proposed annual production (kWh)",
             min_value=0.0,
             value=annual_proposed_kwh,
@@ -532,26 +529,65 @@ def render_model(hourly: pd.DataFrame) -> None:
                 monthly_solar_scales,
             ) = _monthly_production_input(annual_reference_kwh, annual_proposed_kwh)
         except ValueError as error:
-            st.sidebar.error(f"Monthly production is invalid: {error}")
+            st.error(f"Monthly production is invalid: {error}")
             return
-        _readonly_model_value(
+        _readonly_configuration_value(
             "Reference annual production (kWh)",
             "monthly_reference_total",
             reference_production_kwh,
         )
-        _readonly_model_value(
+        _readonly_configuration_value(
             "Proposed annual production (kWh)",
             "monthly_proposed_total",
             proposed_production_kwh,
         )
     solar_scale = proposed_production_kwh / reference_production_kwh
+    if monthly_solar_scales is None:
+        st.caption(f"Production scale: {solar_scale:.3f}×")
+    else:
+        st.caption("Monthly production scales are applied by calendar month.")
+
+
+def _configured_production_scaling() -> tuple[float, tuple[float, ...] | None]:
+    scaling_mode = str(_model_value("production_scaling", "Annual"))
+    annual_reference_kwh = float(_model_value("reference_production_kwh", 2017.56))
+    annual_proposed_kwh = float(_model_value("proposed_production_kwh", 2017.56))
+    if scaling_mode == "Annual":
+        return annual_proposed_kwh / annual_reference_kwh, None
+
+    monthly = _model_value(
+        "monthly_production",
+        _monthly_production_defaults(annual_reference_kwh, annual_proposed_kwh),
+    )
+    _validate_monthly_production(monthly)
+    monthly_scales = tuple(
+        float(proposed / reference)
+        for reference, proposed in zip(
+            monthly[MONTHLY_REFERENCE_COLUMN],
+            monthly[MONTHLY_PROPOSED_COLUMN],
+            strict=True,
+        )
+    )
+    return 1.0, monthly_scales
+
+
+def render_model(hourly: pd.DataFrame) -> None:
+    selected_dates = _date_range_input(hourly)
+    bucket_label = _aggregation_input()
+    if not isinstance(selected_dates, tuple) or len(selected_dates) != 2:
+        st.error("Choose both a start and end date.")
+        return
+    start_date, end_date = selected_dates
+    try:
+        solar_scale, monthly_solar_scales = _configured_production_scaling()
+    except ValueError as error:
+        st.sidebar.error(f"Monthly production is invalid: {error}")
+        return
     export_rate = _export_purchase_rate_input("system_export_rate", 0.096)
     if monthly_solar_scales is None:
         st.sidebar.caption(f"Production scale: {solar_scale:.3f}×")
     else:
-        st.sidebar.caption(
-            "Monthly production scales are applied by calendar month."
-        )
+        st.sidebar.caption("Monthly production scales are applied by calendar month.")
     strategy_label = st.sidebar.selectbox(
         "Battery strategy",
         ["Self-consumption", "TOU reserve"],
@@ -561,6 +597,26 @@ def render_model(hourly: pd.DataFrame) -> None:
         key=_model_widget_key("strategy"),
         on_change=_store_model_value,
         args=("strategy",),
+    )
+    starting_percent = st.sidebar.number_input(
+        "Starting charge (%)",
+        min_value=0.0,
+        max_value=100.0,
+        value=_model_value("starting_percent", 50.0),
+        step=1.0,
+        key=_model_widget_key("starting_percent"),
+        on_change=_store_model_value,
+        args=("starting_percent",),
+    )
+    reserve_percent = st.sidebar.number_input(
+        "Minimum reserve (%)",
+        min_value=0.0,
+        max_value=100.0,
+        value=_model_value("reserve_percent", 10.0),
+        step=1.0,
+        key=_model_widget_key("reserve_percent"),
+        on_change=_store_model_value,
+        args=("reserve_percent",),
     )
     battery_settings = st.sidebar.radio(
         "Battery settings",
@@ -611,26 +667,6 @@ def render_model(hourly: pd.DataFrame) -> None:
                 round(preset["capacity_kwh"] * int(battery_count), 2),
             )
     with st.sidebar.expander("Advanced battery settings"):
-        starting_percent = st.number_input(
-            "Starting charge (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=_model_value("starting_percent", 50.0),
-            step=1.0,
-            key=_model_widget_key("starting_percent"),
-            on_change=_store_model_value,
-            args=("starting_percent",),
-        )
-        reserve_percent = st.number_input(
-            "Minimum reserve (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=_model_value("reserve_percent", 10.0),
-            step=1.0,
-            key=_model_widget_key("reserve_percent"),
-            on_change=_store_model_value,
-            args=("reserve_percent",),
-        )
         if preset is None:
             round_trip_percent = st.number_input(
                 "Round-trip efficiency (%)",
