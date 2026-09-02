@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Sequence
 import numpy as np
 import pandas as pd
 from scipy.optimize import linprog
+from scipy.sparse import lil_matrix
 
 from .tou import TouRule, price_at
 
@@ -66,7 +67,10 @@ def optimize_historical_dispatch(
     )
     bounds.extend((reserve, capacity) for _ in range(count))
 
-    equality = np.zeros((count, 3 * count), dtype=float)
+    # Each hourly state equation touches only three or four variables. Keeping
+    # this matrix sparse avoids allocating a multi-gigabyte dense array for a
+    # full year of hourly history.
+    equality = lil_matrix((count, 3 * count), dtype=float)
     right_hand_side = np.zeros(count, dtype=float)
     for index in range(count):
         equality[index, charge_slice.start + index] = -leg_efficiency
@@ -79,7 +83,7 @@ def optimize_historical_dispatch(
 
     result = linprog(
         objective,
-        A_eq=equality,
+        A_eq=equality.tocsr(),
         b_eq=right_hand_side,
         bounds=bounds,
         method="highs",
