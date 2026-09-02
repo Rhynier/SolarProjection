@@ -33,18 +33,55 @@ def test_self_consumption_discharges_for_any_deficit():
     assert result.loc[0, "battery_soc_kwh"] == pytest.approx(2.0)
 
 
-def test_tou_reserve_preserves_normal_charge_and_discharge_in_peak():
-    rules = parse_tou_rules([{
-        "Name": "Peak", "Start date": "01-01", "End date": "12-31",
-        "Weekdays": "Mon,Tue,Wed,Thu,Fri", "Start time": "18:00",
-        "End time": "20:00", "Classification": "Expensive",
-    }])
+def test_tou_reserve_preserves_charge_until_the_seasonal_maximum_rate():
+    rules = parse_tou_rules([
+        {
+            "Name": "Off-peak", "Start date": "01-01", "End date": "12-31",
+            "Weekdays": "Mon,Tue,Wed,Thu,Fri", "Start time": "00:00",
+            "End time": "12:00", "Price ($/kWh)": "0.1550",
+        },
+        {
+            "Name": "Mid-peak", "Start date": "01-01", "End date": "12-31",
+            "Weekdays": "Mon,Tue,Wed,Thu,Fri", "Start time": "12:00",
+            "End time": "17:00", "Price ($/kWh)": "0.2139",
+        },
+        {
+            "Name": "Peak", "Start date": "01-01", "End date": "12-31",
+            "Weekdays": "Mon,Tue,Wed,Thu,Fri", "Start time": "17:00",
+            "End time": "20:00", "Price ($/kWh)": "0.3765",
+        },
+    ])
     result = simulate(
-        frame([2.0, 2.0], [0.0, 0.0]),
+        frame([2.0, 2.0], [0.0, 0.0], start="2026-07-06 16:00"),
         SimulationConfig(1.0, battery(), "tou_reserve"), rules,
     )
     assert list(result["grid_import_kwh"]) == pytest.approx([2.0, 0.0])
     assert list(result["battery_soc_kwh"]) == pytest.approx([5.0, 3.0])
+    assert list(result["is_expensive"]) == [False, True]
+
+
+def test_tou_reserve_accepts_an_overlapping_seasonal_price_override():
+    rules = parse_tou_rules([
+        {
+            "Name": "Base rate", "Start date": "01-01", "End date": "12-31",
+            "Weekdays": "Mon,Tue,Wed,Thu,Fri,Sat,Sun", "Start time": "00:00",
+            "End time": "00:00", "Price ($/kWh)": "0.1550",
+        },
+        {
+            "Name": "Summer peak", "Start date": "06-01", "End date": "09-30",
+            "Weekdays": "Mon,Tue,Wed,Thu,Fri", "Start time": "17:00",
+            "End time": "20:00", "Price ($/kWh)": "0.3765",
+        },
+    ])
+
+    result = simulate(
+        frame([2.0], [0.0]),
+        SimulationConfig(1.0, battery(), "tou_reserve"),
+        rules,
+    )
+
+    assert result.loc[0, "battery_discharge_output_kwh"] == pytest.approx(2.0)
+    assert bool(result.loc[0, "is_expensive"])
 
 
 def test_solar_charging_honors_efficiency_capacity_and_exports_overflow():
@@ -134,8 +171,10 @@ def test_invalid_configuration_is_rejected(config):
         simulate(frame([0.0], [0.0]), config, [])
 
 
-def test_tou_reserve_requires_an_expensive_rule():
-    with pytest.raises(SimulationValidationError, match="Expensive rule"):
+def test_tou_reserve_requires_a_seasonal_price_spread():
+    with pytest.raises(
+        SimulationValidationError, match="multiple prices in at least one season"
+    ):
         simulate(
             frame([1.0], [0.0]),
             SimulationConfig(1.0, battery(), "tou_reserve"),

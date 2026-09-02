@@ -126,3 +126,28 @@ def test_custom_battery_values_survive_switching_to_a_preset_and_back():
         widget = _number_input(app, label)
         assert widget.value == expected
         assert not widget.disabled
+
+
+def test_smud_prices_are_preloaded_in_the_time_of_use_editor():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+
+    app.radio[0].set_value("System model").run()
+    rules = app.session_state["model.tou_rules"]
+
+    assert list(rules.columns) == [
+        "Name",
+        "Start date",
+        "End date",
+        "Weekdays",
+        "Start time",
+        "End time",
+        "Price ($/kWh)",
+    ]
+    assert len(rules) == 9
+    assert sorted({float(value) for value in rules["Price ($/kWh)"]}) == [
+        0.1285,
+        0.155,
+        0.1776,
+        0.2139,
+        0.3765,
+    ]

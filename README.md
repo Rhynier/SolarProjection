@@ -38,7 +38,10 @@ only; the historical household-load curve stays fixed. The battery charges from
 solar surplus only, never from the grid. Both self-consumption and TOU-reserve
 strategies obey usable capacity, reserve, starting charge, AC-side charge and
 discharge limits, and symmetric per-leg efficiency derived from the configured
-round-trip efficiency. TOU reserve discharges only in valid Expensive periods.
+round-trip efficiency. The TOU editor starts with SMUD's published 2026 rates,
+without holiday exceptions. TOU reserve derives Cheap, Less Expensive, and
+Expensive tiers from each season's configured prices and discharges only at the
+seasonal maximum.
 
 The CSVs and Streamlit session settings remain local and uncommitted. Restart
 the app after replacing either CSV export.

@@ -144,9 +144,9 @@ Battery and TOU changes remain in the current Streamlit session and reset to def
 - Minimum reserve: 10 percent.
 - Round-trip efficiency: 90 percent.
 - Maximum charge and discharge power: 5 kW each.
-- TOU rules: empty, with a prompt to add the user's current schedule.
+- TOU rules: SMUD's published 2026 Time-of-Day schedule and prices, ignoring holiday exceptions.
 
-TOU reserve requires at least one valid Expensive rule. This avoids presenting a model that silently preserves the battery for an empty schedule.
+TOU reserve requires at least one season with multiple prices. This avoids presenting a model that silently preserves the battery for a schedule with no seasonal maximum above its minimum.
 
 ### Time-of-use rules
 
@@ -156,11 +156,11 @@ Each editable rule has:
 - Recurring effective start and end month/day.
 - Applicable weekdays.
 - Start and end time.
-- Classification as Expensive or Normal.
+- Price in dollars per kWh.
 
-Effective date endpoints are inclusive. Time intervals are start-inclusive and end-exclusive. Overnight time ranges and date ranges that wrap across the end of the year are supported. For an overnight rule, the applicable weekday is the day on which the interval starts.
+Effective date endpoints are inclusive. Time intervals are start-inclusive and end-exclusive. Equal start and end times represent a full day. Overnight time ranges and date ranges that wrap across the end of the year are supported. For an overnight rule, the applicable weekday is the day on which the interval starts.
 
-Hours not matched by a rule are Normal. If multiple valid rules match, Expensive wins.
+If multiple valid rules match, the highest price wins. Within each season, the minimum price is Cheap, the maximum price is Expensive, and any intermediate price is Less Expensive. Hours without a matching rule have no price and are not Expensive.
 
 ## Hourly Simulation
 
@@ -215,7 +215,7 @@ Battery state of charge stays between the configured reserve and usable capacity
 
 **Self-consumption** discharges the battery for any load deficit while charge remains above reserve.
 
-**TOU reserve** discharges the battery only when the current hour is classified as Expensive. During Normal hours, grid import serves any deficit and stored energy is preserved.
+**TOU reserve** discharges the battery only when the current hour uses the maximum configured price for its season. At Cheap, Less Expensive, or unmatched hours, grid import serves any deficit and stored energy is preserved.
 
 Both strategies always allow direct solar consumption and solar-only charging.
 

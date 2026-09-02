@@ -4,7 +4,7 @@ from typing import Literal, Sequence
 
 import pandas as pd
 
-from .tou import TouRule, is_expensive
+from .tou import TouRule, has_seasonal_price_spread, is_expensive
 
 
 Strategy = Literal["self_consumption", "tou_reserve"]
@@ -70,10 +70,12 @@ def _validate_config(config: SimulationConfig, tou_rules: Sequence[TouRule]) -> 
         raise SimulationValidationError("round_trip_efficiency must be in (0, 1]")
     if config.strategy not in {"self_consumption", "tou_reserve"}:
         raise SimulationValidationError("strategy must be self_consumption or tou_reserve")
-    if config.strategy == "tou_reserve" and not any(
-        rule.classification == "expensive" for rule in tou_rules
+    if config.strategy == "tou_reserve" and not has_seasonal_price_spread(
+        tou_rules
     ):
-        raise SimulationValidationError("TOU reserve requires an Expensive rule")
+        raise SimulationValidationError(
+            "TOU reserve requires multiple prices in at least one season"
+        )
 
 
 def _clamp_soc_drift(soc: float, reserve: float, capacity: float) -> float:

@@ -13,7 +13,11 @@ from solar_model.simulation import (
     SimulationValidationError,
     simulate,
 )
-from solar_model.tou import TouValidationError, parse_tou_rules
+from solar_model.tou import (
+    SMUD_DEFAULT_TOU_ROWS,
+    TouValidationError,
+    parse_tou_rules,
+)
 
 
 ROOT = Path(__file__).parent
@@ -28,7 +32,7 @@ TOU_COLUMNS = [
     "Weekdays",
     "Start time",
     "End time",
-    "Classification",
+    "Price ($/kWh)",
 ]
 MODEL_STATE_PREFIX = "model."
 MODEL_WIDGET_PREFIX = "_model."
@@ -310,12 +314,22 @@ def render_model(hourly: pd.DataFrame) -> None:
 
     chart_slot = st.empty()
     st.subheader("Time-of-use rules")
-    st.caption("Add your current schedule. Dates use MM-DD; weekdays use Mon,Tue,…")
+    st.caption(
+        "SMUD Time-of-Day rates are preloaded. Dates use MM-DD; weekdays use "
+        "Mon,Tue,… Holidays are treated as ordinary weekdays."
+    )
     edited_rules = st.data_editor(
-        _model_value("tou_rules", pd.DataFrame(columns=TOU_COLUMNS)),
+        _model_value(
+            "tou_rules", pd.DataFrame(SMUD_DEFAULT_TOU_ROWS, columns=TOU_COLUMNS)
+        ),
         num_rows="dynamic",
         width="stretch",
         key=_model_widget_key("tou_rules"),
+        column_config={
+            "Price ($/kWh)": st.column_config.NumberColumn(
+                "Price ($/kWh)", min_value=0.0, format="$%.4f"
+            )
+        },
     )
     st.session_state[_model_state_key("tou_rules")] = edited_rules
     try:
