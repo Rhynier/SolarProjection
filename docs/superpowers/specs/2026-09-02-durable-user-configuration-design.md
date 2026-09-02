@@ -1,6 +1,6 @@
 # Durable User Configuration Design
 
-**Status:** Awaiting written-spec review
+**Status:** Approved for implementation
 **Date:** 2026-09-02
 
 ## Purpose
