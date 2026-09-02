@@ -535,6 +535,8 @@ def _persist_configuration_section(section: str) -> bool:
     candidate[section] = _configuration_section_from_state(section)
     try:
         normalized = validate_configuration(candidate)
+        if normalized == st.session_state[CONFIG_DOCUMENT_KEY]:
+            return True
         saved = save_configuration(st.session_state[CONFIG_PATH_KEY], normalized)
     except ConfigurationValidationError:
         return False

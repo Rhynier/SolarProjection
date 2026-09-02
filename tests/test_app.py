@@ -805,10 +805,11 @@ def test_time_of_use_editor_edits_persist_across_analytical_views():
     assert not app.exception
 
 
-def test_time_of_use_rules_persist_across_fresh_sessions():
+def test_time_of_use_rules_persist_across_fresh_sessions(isolate_user_configuration):
     first = _new_app()
     first.radio[0].set_value("Configuration").run()
     first = _edit_data_editor(first, 0, "Price ($/kWh)", 0.20, editor_index=0)
+    assert isolate_user_configuration.exists()
 
     second = _new_app()
     second.radio[0].set_value("Configuration").run()
@@ -916,8 +917,42 @@ def test_new_blank_tou_row_is_omitted_from_persisted_rules(
 
     _edit_data_editor_rows(app, {}, added_rows=[{}])
 
-    saved = json.loads(isolate_user_configuration.read_text(encoding="utf-8"))
-    assert saved["time_of_use"] == default_configuration()["time_of_use"]
+    assert not isolate_user_configuration.exists()
+
+
+def test_whitespace_only_tou_edit_does_not_create_configuration_file(
+    isolate_user_configuration,
+):
+    app = _new_app()
+    app.radio[0].set_value("Configuration").run()
+
+    _edit_data_editor(app, 0, "Name", " Non-summer off-peak morning ")
+
+    assert not isolate_user_configuration.exists()
+
+
+def test_configuration_save_retries_after_failure_when_value_changes(
+    monkeypatch, tmp_path
+):
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("block", encoding="utf-8")
+    config_path = blocker / "config.json"
+    monkeypatch.setenv("HOME_ENERGY_MODEL_CONFIG_PATH", str(config_path))
+    app = _new_app()
+
+    _number_input(
+        app, "Utility purchase rate for exported energy ($/kWh)"
+    ).set_value(0.07).run()
+    assert any("could not be saved" in item.value.lower() for item in app.error)
+
+    blocker.unlink()
+    blocker.mkdir()
+    _number_input(
+        app, "Utility purchase rate for exported energy ($/kWh)"
+    ).set_value(0.08).run()
+
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["historical"]["export_purchase_rate_per_kwh"] == pytest.approx(0.08)
 
 
 def test_transient_view_state_is_not_written(isolate_user_configuration):
