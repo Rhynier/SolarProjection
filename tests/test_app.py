@@ -54,7 +54,20 @@ def _energy_value(value: str) -> float:
     return float(value.removesuffix(" kWh").replace(",", ""))
 
 
-def _edit_data_editor(app: AppTest, row: int, column: str, value: object) -> AppTest:
+def _plotly_values(trace) -> np.ndarray:
+    encoded_values = trace.to_plotly_json()["y"]
+    if isinstance(encoded_values, dict):
+        return np.frombuffer(
+            base64.b64decode(encoded_values["bdata"]),
+            dtype=encoded_values["dtype"],
+        )
+    return np.asarray(encoded_values, dtype=float)
+
+
+def _edit_data_editor_rows(
+    app: AppTest,
+    edited_rows: dict[int, dict[str, object]],
+) -> AppTest:
     editor = app.get("dataframe")[0]
     widget_states = app._tree.get_widget_states()
     widget_states.widgets.append(
@@ -62,7 +75,9 @@ def _edit_data_editor(app: AppTest, row: int, column: str, value: object) -> App
             id=editor.proto.id,
             string_value=json.dumps(
                 {
-                    "edited_rows": {str(row): {column: value}},
+                    "edited_rows": {
+                        str(row): values for row, values in edited_rows.items()
+                    },
                     "added_rows": [],
                     "deleted_rows": [],
                 }
@@ -70,6 +85,10 @@ def _edit_data_editor(app: AppTest, row: int, column: str, value: object) -> App
         )
     )
     return app._tree._runner._run(widget_states, timeout=30)
+
+
+def _edit_data_editor(app: AppTest, row: int, column: str, value: object) -> AppTest:
+    return _edit_data_editor_rows(app, {row: {column: value}})
 
 
 def test_app_starts_against_supplied_csvs_without_exceptions():
@@ -264,6 +283,217 @@ def test_model_battery_capacity_survives_a_history_round_trip():
     app.radio[0].set_value("System model").run()
 
     assert _number_input(app, "Battery usable capacity (kWh)").value == 20.0
+
+
+def test_system_model_derives_solar_scale_from_annual_production():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+    app.radio[0].set_value("System model").run()
+
+    reference = _number_input(app, "Reference annual production (kWh)")
+    proposed = _number_input(app, "Proposed annual production (kWh)")
+    assert reference.value == pytest.approx(2017.56)
+    assert proposed.value == pytest.approx(2017.56)
+
+    initial_figure = pio.from_json(app.get("plotly_chart")[0].proto.spec)
+    initial_production = next(
+        trace for trace in initial_figure.data if trace.name == "Production"
+    )
+
+    reference.set_value(1000.0).run()
+    _number_input(app, "Proposed annual production (kWh)").set_value(2000.0).run()
+
+    updated_figure = pio.from_json(app.get("plotly_chart")[0].proto.spec)
+    updated_production = next(
+        trace for trace in updated_figure.data if trace.name == "Production"
+    )
+    assert _plotly_values(updated_production).sum() == pytest.approx(
+        2 * _plotly_values(initial_production).sum()
+    )
+    assert any(
+        caption.value == "Production scale: 2.000×" for caption in app.caption
+    )
+
+    app.radio[0].set_value("Historical view").run()
+    app.radio[0].set_value("System model").run()
+
+    assert _number_input(app, "Reference annual production (kWh)").value == 1000.0
+    assert _number_input(app, "Proposed annual production (kWh)").value == 2000.0
+    assert any(
+        caption.value == "Production scale: 2.000×" for caption in app.caption
+    )
+
+
+def test_monthly_scaling_initializes_from_retained_annual_values():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+    app.radio[0].set_value("System model").run()
+    _number_input(app, "Reference annual production (kWh)").set_value(1200.0).run()
+    _number_input(app, "Proposed annual production (kWh)").set_value(2400.0).run()
+
+    scaling_mode = _radio(app, "Production scaling")
+    assert scaling_mode.value == "Annual"
+    scaling_mode.set_value("Monthly").run()
+
+    monthly = app.session_state["model.monthly_production"]
+    assert list(monthly["Month"]) == [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ]
+    assert list(monthly["Reference production (kWh)"]) == pytest.approx(
+        [100.0] * 12
+    )
+    assert list(monthly["Proposed production (kWh)"]) == pytest.approx(
+        [200.0] * 12
+    )
+    assert _number_input(app, "Reference annual production (kWh)").value == 1200.0
+    assert _number_input(app, "Reference annual production (kWh)").disabled
+    assert _number_input(app, "Proposed annual production (kWh)").value == 2400.0
+    assert _number_input(app, "Proposed annual production (kWh)").disabled
+    assert any(
+        caption.value == "Monthly production scales are applied by calendar month."
+        for caption in app.caption
+    )
+    assert not any(
+        caption.value.startswith("Production scale:") for caption in app.caption
+    )
+
+
+def test_monthly_initialization_uses_displayed_precision_without_hidden_values():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+    app.radio[0].set_value("System model").run()
+    _number_input(app, "Reference annual production (kWh)").set_value(1000.0).run()
+    _number_input(app, "Proposed annual production (kWh)").set_value(1000.0).run()
+
+    _radio(app, "Production scaling").set_value("Monthly").run()
+
+    monthly = app.session_state["model.monthly_production"]
+    expected = [83.3334] * 4 + [83.3333] * 8
+    assert list(monthly["Reference production (kWh)"]) == pytest.approx(expected)
+    assert list(monthly["Proposed production (kWh)"]) == pytest.approx(expected)
+    assert _number_input(
+        app, "Reference annual production (kWh)"
+    ).value == pytest.approx(1000.0)
+    assert _number_input(
+        app, "Proposed annual production (kWh)"
+    ).value == pytest.approx(1000.0)
+
+
+def test_monthly_initialization_supports_the_smallest_annual_reference():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+    app.radio[0].set_value("System model").run()
+    _number_input(app, "Reference annual production (kWh)").set_value(0.01).run()
+    _number_input(app, "Proposed annual production (kWh)").set_value(0.0).run()
+
+    _radio(app, "Production scaling").set_value("Monthly").run()
+
+    monthly = app.session_state["model.monthly_production"]
+    assert not app.error
+    assert all(value > 0 for value in monthly["Reference production (kWh)"])
+    assert monthly["Reference production (kWh)"].sum() == pytest.approx(0.01)
+    assert _number_input(
+        app, "Reference annual production (kWh)"
+    ).value == pytest.approx(0.01)
+
+
+def test_annual_scaling_values_survive_a_monthly_round_trip():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+    app.radio[0].set_value("System model").run()
+    _number_input(app, "Reference annual production (kWh)").set_value(1200.0).run()
+    _number_input(app, "Proposed annual production (kWh)").set_value(2400.0).run()
+    _radio(app, "Production scaling").set_value("Monthly").run()
+
+    app = _edit_data_editor(app, 0, "Proposed production (kWh)", 300.0)
+    assert _number_input(app, "Proposed annual production (kWh)").value == 2500.0
+
+    _radio(app, "Production scaling").set_value("Annual").run()
+    assert _number_input(app, "Reference annual production (kWh)").value == 1200.0
+    assert not _number_input(app, "Reference annual production (kWh)").disabled
+    assert _number_input(app, "Proposed annual production (kWh)").value == 2400.0
+    assert not _number_input(app, "Proposed annual production (kWh)").disabled
+
+    _radio(app, "Production scaling").set_value("Monthly").run()
+    assert _number_input(app, "Proposed annual production (kWh)").value == 2500.0
+    assert _number_input(app, "Proposed annual production (kWh)").disabled
+
+
+def test_monthly_scaling_editor_applies_the_selected_month_factor():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+    _date_input(app, "Date range").set_value(
+        (date(2026, 1, 1), date(2026, 1, 1))
+    ).run()
+    app.radio[0].set_value("System model").run()
+    initial_figure = pio.from_json(app.get("plotly_chart")[0].proto.spec)
+    initial_production = next(
+        trace for trace in initial_figure.data if trace.name == "Production"
+    )
+
+    _radio(app, "Production scaling").set_value("Monthly").run()
+    app = _edit_data_editor(app, 0, "Proposed production (kWh)", 336.26)
+
+    updated_figure = pio.from_json(app.get("plotly_chart")[0].proto.spec)
+    updated_production = next(
+        trace for trace in updated_figure.data if trace.name == "Production"
+    )
+    assert _plotly_values(updated_production).sum() == pytest.approx(
+        2 * _plotly_values(initial_production).sum()
+    )
+
+
+@pytest.mark.parametrize(
+    ("column", "message"),
+    [
+        (
+            "Reference production (kWh)",
+            "January reference production must be a finite number greater than zero",
+        ),
+        (
+            "Proposed production (kWh)",
+            "January proposed production must be a finite nonnegative number",
+        ),
+    ],
+)
+def test_monthly_scaling_rejects_blank_cells_with_a_month_specific_error(
+    column,
+    message,
+):
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+    app.radio[0].set_value("System model").run()
+    _radio(app, "Production scaling").set_value("Monthly").run()
+
+    app = _edit_data_editor(app, 0, column, None)
+
+    assert not app.exception
+    assert any(message in error.value for error in app.error)
+
+
+def test_monthly_scaling_all_blank_references_do_not_crash():
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
+    app.radio[0].set_value("System model").run()
+    _radio(app, "Production scaling").set_value("Monthly").run()
+
+    app = _edit_data_editor_rows(
+        app,
+        {
+            row: {"Reference production (kWh)": None}
+            for row in range(12)
+        },
+    )
+
+    assert not app.exception
+    assert any(
+        "January reference production must be a finite number greater than zero"
+        in error.value
+        for error in app.error
+    )
 
 
 @pytest.mark.parametrize(
@@ -494,7 +724,7 @@ def test_system_model_projected_cost_uses_the_configured_export_purchase_rate():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
 
     app.radio[0].set_value("System model").run()
-    _number_input(app, "Solar scale").set_value(100.0).run()
+    _number_input(app, "Proposed annual production (kWh)").set_value(201756.0).run()
     initial_cost = _currency_value(_metric(app, "Projected cost").value)
     exported_kwh = _energy_value(_metric(app, "Grid export").value)
     _number_input(

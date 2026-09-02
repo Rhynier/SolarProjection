@@ -22,8 +22,8 @@ The application must:
 - Aggregate historical energy into readable hourly, daily, weekly, or monthly
   buckets.
 - Replay any selected historical date range at hourly resolution.
-- Scale production from the existing 1.29 kW solar array to represent a larger
-  hypothetical array.
+- Scale historical solar production from configurable reference and proposed
+  production, using either one annual ratio or twelve calendar-month ratios.
 - Model a configurable battery that charges from solar surplus only.
 - Support both self-consumption and time-of-use reserve strategies.
 - Display modeled household use, production, battery state of charge, grid
@@ -111,7 +111,7 @@ absolute timestamps are invalid. Production must be finite, numeric, and
 nonnegative.
 
 Production is converted from Wh to kWh and summed by the local date and hour
-used by the utility export. The nominal source system size is 1.29 kW.
+used by the utility export.
 
 ### 5.3 Daylight-saving behavior
 
@@ -245,19 +245,48 @@ The sidebar provides:
   Historical view.
 - The same `Auto`, `Hour`, `Day`, `Week`, or `Month` aggregation selector used
   by the Historical view.
-- Solar scale, which must be nonnegative.
+- An `Annual` or `Monthly` production-scaling mode, defaulting to `Annual`.
+- Reference annual solar production in kWh, which must be greater than zero in
+  Annual mode.
+- Proposed-system annual solar production in kWh, which must be nonnegative in
+  Annual mode.
 - Utility purchase rate for exported energy, defaulting to `$0.0960/kWh`.
-- Equivalent nominal array size:
+- The calculated annual production scale:
 
 ```text
-equivalent_array_kw = 1.29 * solar_scale
+solar_scale = proposed_annual_production_kwh / reference_annual_production_kwh
 ```
+
+Monthly mode provides a fixed twelve-row editor with Month, Reference
+production, Proposed production, and calculated Scale columns. Month and Scale
+are read-only. Reference and Proposed production are required numeric values.
+Every monthly reference value must be finite and greater than zero, and every
+monthly proposed value must be finite and nonnegative. Invalid cells produce a
+month-specific error and prevent simulation. Each scale is calculated as:
+
+```text
+monthly_solar_scale[month] = proposed_monthly_production_kwh[month]
+                           / reference_monthly_production_kwh[month]
+```
+
+The first time Monthly mode is selected, each monthly reference and proposed
+value is initialized by distributing its corresponding retained Annual-mode
+value as evenly as possible at the editor's four-decimal kWh precision across
+the twelve months. The displayed monthly values therefore sum to the retained
+annual value, including when the annual reference is the minimum `0.01 kWh`.
+In Monthly mode, the annual reference and proposed controls are
+read-only and display the sums of their respective monthly columns. The UI
+states that calendar-month scales are active rather than presenting the annual
+totals ratio as an applied scale. Annual and Monthly values remain independent:
+returning to Annual mode restores the prior editable Annual-mode values, and
+returning to Monthly mode restores the prior monthly values.
 
 The period type, resulting date range, and aggregation value remain synchronized
 between views. Their defaults are `Custom`, the first available inclusive
-one-month range, and `Auto`. Solar scale defaults to 1.0. Aggregation changes
-chart presentation only; the battery simulation always processes each selected
-hour in chronological order.
+one-month range, and `Auto`. Annual-mode reference and proposed production both
+default to `2017.56 kWh`, producing a default solar scale of `1.0`. Aggregation
+changes chart presentation only; the battery simulation always processes each
+selected hour in chronological order.
 
 ### 9.2 Battery strategy
 
@@ -309,10 +338,11 @@ Starting state of charge must not be below the reserve.
 ### 9.5 Session behavior
 
 The shared period type, date range, rolling-period Start date, and aggregation,
-plus model solar scale, strategy, battery mode, battery model, battery quantity,
-custom battery values, common battery values, shared TOU edits, and the independent
-Historical and System-model export purchase rates must survive navigation
-between all three pages during the current Streamlit session.
+plus model production-scaling mode, independent annual and monthly production
+values, strategy, battery mode, battery model, battery quantity, custom battery
+values, common battery values, shared TOU edits, and the independent Historical
+and System-model export purchase rates must survive navigation between all
+three pages during the current Streamlit session.
 
 All session settings reset when the application process restarts. No settings
 are written to disk.
@@ -413,7 +443,8 @@ charges, taxes, fees, and other utility bill adjustments.
 
 For each selected historical hour, the simulation:
 
-1. Multiplies actual solar production by the solar scale.
+1. Multiplies actual solar production by either the Annual-mode scale or, in
+   Monthly mode, the scale for the hour's calendar month.
 2. Applies modeled solar directly to household load.
 3. Sends solar surplus to the battery, subject to capacity, charge-power, and
    efficiency limits.
@@ -563,7 +594,11 @@ Source data validation rejects:
 Model validation rejects:
 
 - Dates outside the available shared range.
-- Negative or non-finite solar scale, capacity, or power limits.
+- Nonpositive or non-finite reference annual production.
+- Negative or non-finite proposed annual production, solar scale, capacity, or
+  power limits.
+- Monthly scale profiles that do not contain exactly twelve finite,
+  nonnegative values.
 - Starting or reserve percentages outside 0 through 100.
 - Starting state of charge below reserve.
 - Round-trip efficiency outside `(0, 1]`.

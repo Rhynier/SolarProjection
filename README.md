@@ -33,15 +33,24 @@ Keep these uncommitted files in the project root:
 The app aligns matching utility and solar hours. Its estimated household load
 is `grid import + actual solar production - grid export` (all in kWh).
 
-The system model replays selected historical hours. It scales solar production
-only; the historical household-load curve stays fixed. The battery charges from
-solar surplus only, never from the grid. Both self-consumption and TOU-reserve
-strategies obey usable capacity, reserve, starting charge, AC-side charge and
-discharge limits, and symmetric per-leg efficiency derived from the configured
-round-trip efficiency. The Configuration view's shared TOU editor starts with
-SMUD's published 2026 rates, without holiday exceptions. TOU reserve derives
-Cheap, Less Expensive, and Expensive tiers from each season's configured prices
-and discharges only at the seasonal maximum.
+The system model replays selected historical hours. Annual production scaling
+divides the proposed system's configured annual production by the configured
+reference annual production; both values default to `2017.56 kWh`. Monthly
+scaling provides independent reference and proposed values for every calendar
+month and applies each calculated ratio only to historical hours in that month.
+The monthly values initially distribute the retained annual settings as evenly
+as possible at four-decimal kWh precision, while the annual fields become
+read-only monthly totals. Annual and monthly settings remain independent when
+switching modes. Monthly reference and proposed values are required; invalid
+values stop simulation with a month-specific error. The historical
+household-load curve stays fixed. The battery charges from solar surplus only,
+never from the grid. Both self-consumption and TOU-reserve strategies obey
+usable capacity, reserve, starting charge, AC-side charge and discharge limits,
+and symmetric per-leg efficiency derived from the configured round-trip
+efficiency. The Configuration view's shared TOU editor starts with SMUD's
+published 2026 rates, without holiday exceptions. TOU reserve derives Cheap,
+Less Expensive, and Expensive tiers from each season's configured prices and
+discharges only at the seasonal maximum.
 
 The Historical and System model views share one period and one aggregation
 setting. Choose all available data, a seven-day range beginning on a selected

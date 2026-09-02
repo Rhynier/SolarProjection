@@ -1,4 +1,5 @@
 from datetime import date
+from math import isfinite
 from pathlib import Path
 
 import pandas as pd
@@ -36,7 +37,6 @@ from solar_model.tou import (
 ROOT = Path(__file__).parent
 UTILITY_PATH = ROOT / "combined-electric-usage.csv"
 SOLAR_PATH = ROOT / "combined-monthly-energy.csv"
-BASE_SOLAR_KW = 1.29
 HISTORY_SERIES = ["Used", "Production", "Grid export"]
 TOU_COLUMNS = [
     "Name",
@@ -53,6 +53,22 @@ SHARED_STATE_PREFIX = "shared."
 SHARED_WIDGET_PREFIX = "_shared."
 AGGREGATION_OPTIONS = ["Auto", "Hour", "Day", "Week", "Month"]
 PERIOD_OPTIONS = ["Custom", "Week", "Month", "All"]
+MONTH_NAMES = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+]
+MONTHLY_REFERENCE_COLUMN = "Reference production (kWh)"
+MONTHLY_PROPOSED_COLUMN = "Proposed production (kWh)"
 BATTERY_PRESETS = {
     "Tesla Powerwall 3": {
         "capacity_kwh": 13.5,
@@ -348,6 +364,124 @@ def _readonly_preset_value(label: str, name: str, value: float) -> float:
     )
 
 
+def _readonly_model_value(label: str, name: str, value: float) -> float:
+    widget_key = _model_widget_key(f"readonly_{name}")
+    st.session_state[widget_key] = float(value)
+    return st.sidebar.number_input(
+        label,
+        min_value=0.0,
+        step=0.01,
+        format="%.2f",
+        disabled=True,
+        key=widget_key,
+    )
+
+
+def _monthly_production_defaults(
+    reference_annual_kwh: float,
+    proposed_annual_kwh: float,
+) -> pd.DataFrame:
+    def distribute_display_units(annual_kwh: float) -> list[float]:
+        total_units = int(round(annual_kwh * 10_000))
+        base_units, remainder = divmod(total_units, 12)
+        return [
+            (base_units + (1 if month_index < remainder else 0)) / 10_000.0
+            for month_index in range(12)
+        ]
+
+    return pd.DataFrame(
+        {
+            "Month": MONTH_NAMES,
+            MONTHLY_REFERENCE_COLUMN: distribute_display_units(
+                reference_annual_kwh
+            ),
+            MONTHLY_PROPOSED_COLUMN: distribute_display_units(proposed_annual_kwh),
+        }
+    )
+
+
+def _validate_monthly_production(monthly: pd.DataFrame) -> None:
+    for row in monthly.itertuples(index=False, name=None):
+        month, reference, proposed = row
+        try:
+            valid_reference = isfinite(reference) and reference > 0
+        except (TypeError, ValueError):
+            valid_reference = False
+        if not valid_reference:
+            raise ValueError(
+                f"{month} reference production must be a finite number greater than zero"
+            )
+        try:
+            valid_proposed = isfinite(proposed) and proposed >= 0
+        except (TypeError, ValueError):
+            valid_proposed = False
+        if not valid_proposed:
+            raise ValueError(
+                f"{month} proposed production must be a finite nonnegative number"
+            )
+
+
+def _monthly_production_input(
+    reference_annual_kwh: float,
+    proposed_annual_kwh: float,
+) -> tuple[float, float, tuple[float, ...]]:
+    state_key = _model_state_key("monthly_production")
+    monthly = _model_value(
+        "monthly_production",
+        _monthly_production_defaults(reference_annual_kwh, proposed_annual_kwh),
+    )
+    display = monthly.copy()
+    reference_values = pd.to_numeric(
+        display[MONTHLY_REFERENCE_COLUMN], errors="coerce"
+    )
+    proposed_values = pd.to_numeric(display[MONTHLY_PROPOSED_COLUMN], errors="coerce")
+    display["Scale"] = (proposed_values / reference_values).where(
+        reference_values > 0
+    )
+    edited = st.sidebar.data_editor(
+        display,
+        hide_index=True,
+        width="stretch",
+        disabled=["Month", "Scale"],
+        key=_model_widget_key("monthly_production"),
+        column_config={
+            MONTHLY_REFERENCE_COLUMN: st.column_config.NumberColumn(
+                MONTHLY_REFERENCE_COLUMN,
+                min_value=0.0001,
+                format="%.4f",
+                required=True,
+            ),
+            MONTHLY_PROPOSED_COLUMN: st.column_config.NumberColumn(
+                MONTHLY_PROPOSED_COLUMN,
+                min_value=0.0,
+                format="%.4f",
+                required=True,
+            ),
+            "Scale": st.column_config.NumberColumn("Scale", format="%.3f"),
+        },
+    )
+    edited_monthly = edited[
+        ["Month", MONTHLY_REFERENCE_COLUMN, MONTHLY_PROPOSED_COLUMN]
+    ].copy()
+    changed = not edited_monthly.equals(monthly)
+    st.session_state[state_key] = edited_monthly
+    if changed:
+        st.rerun()
+
+    _validate_monthly_production(edited_monthly)
+    reference_total = float(edited_monthly[MONTHLY_REFERENCE_COLUMN].sum())
+    proposed_total = float(edited_monthly[MONTHLY_PROPOSED_COLUMN].sum())
+    monthly_scales = tuple(
+        float(proposed / reference)
+        for reference, proposed in zip(
+            edited_monthly[MONTHLY_REFERENCE_COLUMN],
+            edited_monthly[MONTHLY_PROPOSED_COLUMN],
+            strict=True,
+        )
+    )
+    return reference_total, proposed_total, monthly_scales
+
+
 def render_model(hourly: pd.DataFrame) -> None:
     selected_dates = _date_range_input(hourly)
     bucket_label = _aggregation_input()
@@ -355,17 +489,69 @@ def render_model(hourly: pd.DataFrame) -> None:
         st.error("Choose both a start and end date.")
         return
     start_date, end_date = selected_dates
-    solar_scale = st.sidebar.number_input(
-        "Solar scale",
-        min_value=0.0,
-        value=_model_value("solar_scale", 1.0),
-        step=0.1,
-        key=_model_widget_key("solar_scale"),
+    scaling_mode = st.sidebar.radio(
+        "Production scaling",
+        ["Annual", "Monthly"],
+        index=["Annual", "Monthly"].index(
+            _model_value("production_scaling", "Annual")
+        ),
+        horizontal=True,
+        key=_model_widget_key("production_scaling"),
         on_change=_store_model_value,
-        args=("solar_scale",),
+        args=("production_scaling",),
     )
+    annual_reference_kwh = float(_model_value("reference_production_kwh", 2017.56))
+    annual_proposed_kwh = float(_model_value("proposed_production_kwh", 2017.56))
+    monthly_solar_scales = None
+    if scaling_mode == "Annual":
+        reference_production_kwh = st.sidebar.number_input(
+            "Reference annual production (kWh)",
+            min_value=0.01,
+            value=annual_reference_kwh,
+            step=0.01,
+            format="%.2f",
+            key=_model_widget_key("reference_production_kwh"),
+            on_change=_store_model_value,
+            args=("reference_production_kwh",),
+        )
+        proposed_production_kwh = st.sidebar.number_input(
+            "Proposed annual production (kWh)",
+            min_value=0.0,
+            value=annual_proposed_kwh,
+            step=0.01,
+            format="%.2f",
+            key=_model_widget_key("proposed_production_kwh"),
+            on_change=_store_model_value,
+            args=("proposed_production_kwh",),
+        )
+    else:
+        try:
+            (
+                reference_production_kwh,
+                proposed_production_kwh,
+                monthly_solar_scales,
+            ) = _monthly_production_input(annual_reference_kwh, annual_proposed_kwh)
+        except ValueError as error:
+            st.sidebar.error(f"Monthly production is invalid: {error}")
+            return
+        _readonly_model_value(
+            "Reference annual production (kWh)",
+            "monthly_reference_total",
+            reference_production_kwh,
+        )
+        _readonly_model_value(
+            "Proposed annual production (kWh)",
+            "monthly_proposed_total",
+            proposed_production_kwh,
+        )
+    solar_scale = proposed_production_kwh / reference_production_kwh
     export_rate = _export_purchase_rate_input("system_export_rate", 0.096)
-    st.sidebar.caption(f"Equivalent array: {BASE_SOLAR_KW * solar_scale:.2f} kW")
+    if monthly_solar_scales is None:
+        st.sidebar.caption(f"Production scale: {solar_scale:.3f}×")
+    else:
+        st.sidebar.caption(
+            "Monthly production scales are applied by calendar month."
+        )
     strategy_label = st.sidebar.selectbox(
         "Battery strategy",
         ["Self-consumption", "TOU reserve"],
@@ -516,6 +702,7 @@ def render_model(hourly: pd.DataFrame) -> None:
         solar_scale=solar_scale,
         battery=battery,
         strategy="self_consumption" if strategy_label == "Self-consumption" else "tou_reserve",
+        monthly_solar_scales=monthly_solar_scales,
     )
     try:
         result = simulate(selected, config, rules)
