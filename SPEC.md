@@ -392,6 +392,10 @@ values; and valid TOU rules. The TOU editor's display fields map to the seven
 semantic JSON keys `name`, `start_date`, `end_date`, `weekdays`, `start_time`,
 `end_time`, and `price_per_kwh`; blank TOU rows are excluded.
 
+Schema-version-1 files saved by an earlier release with the battery strategy
+label `TOU reserve` remain valid and load as `Fixed TOU reserve`. The normalized
+label is used for later saves.
+
 Each valid edit saves only its top-level section automatically. Writes validate
 the complete document and atomically replace the destination file. A new
 installation continues to use the listed defaults and does not create a

@@ -92,6 +92,18 @@ BATTERY_PRESETS = {
         "max_discharge_kw": 7.08,
     },
 }
+BATTERY_STRATEGIES = [
+    "Self-consumption",
+    "Fixed TOU reserve",
+    "Cost optimized (historical foresight)",
+    "Full backup",
+]
+BATTERY_STRATEGY_VALUES = {
+    "Self-consumption": "self_consumption",
+    "Fixed TOU reserve": "tou_reserve",
+    "Cost optimized (historical foresight)": "cost_optimized",
+    "Full backup": "full_backup",
+}
 CONFIG_DOCUMENT_KEY = "_configuration.document"
 CONFIG_PATH_KEY = "_configuration.path"
 CONFIG_AUTOSAVE_KEY = "_configuration.autosave_enabled"
@@ -845,34 +857,58 @@ def render_model(hourly: pd.DataFrame) -> None:
         st.sidebar.caption("Monthly production scales are applied by calendar month.")
     strategy_label = st.sidebar.selectbox(
         "Battery strategy",
-        ["Self-consumption", "TOU reserve"],
-        index=["Self-consumption", "TOU reserve"].index(
-            _model_value("strategy", "Self-consumption")
-        ),
+        BATTERY_STRATEGIES,
+        index=BATTERY_STRATEGIES.index(_model_value("strategy", "Self-consumption")),
         key=_model_widget_key("strategy"),
         on_change=_store_model_value,
         args=("strategy", "battery"),
     )
-    starting_percent = st.sidebar.number_input(
-        "Starting charge (%)",
-        min_value=0.0,
-        max_value=100.0,
-        value=_model_value("starting_percent", 50.0),
-        step=1.0,
-        key=_model_widget_key("starting_percent"),
-        on_change=_store_model_value,
-        args=("starting_percent", "battery"),
-    )
-    reserve_percent = st.sidebar.number_input(
-        "Minimum reserve (%)",
-        min_value=0.0,
-        max_value=100.0,
-        value=_model_value("reserve_percent", 10.0),
-        step=1.0,
-        key=_model_widget_key("reserve_percent"),
-        on_change=_store_model_value,
-        args=("reserve_percent", "battery"),
-    )
+    if strategy_label == "Fixed TOU reserve":
+        st.sidebar.caption(
+            "Discharges only during hours classified as Expensive by the "
+            "configured time-of-use rules."
+        )
+    elif strategy_label == "Cost optimized (historical foresight)":
+        st.sidebar.caption(
+            "Uses recorded future load and solar across the selected period to "
+            "minimize utility energy cost. This idealized comparison excludes "
+            "battery degradation and is not an Enphase production forecast."
+        )
+    elif strategy_label == "Full backup":
+        st.sidebar.caption(
+            "Models normal on-grid Full Backup operation: the battery starts full "
+            "and remains reserved. Grid charging and outages are not modeled."
+        )
+
+    if strategy_label == "Full backup":
+        with st.sidebar:
+            starting_percent = _readonly_configuration_value(
+                "Starting charge (%)", "full_backup_starting_percent", 100.0
+            )
+            reserve_percent = _readonly_configuration_value(
+                "Minimum reserve (%)", "full_backup_reserve_percent", 100.0
+            )
+    else:
+        starting_percent = st.sidebar.number_input(
+            "Starting charge (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=_model_value("starting_percent", 50.0),
+            step=1.0,
+            key=_model_widget_key("starting_percent"),
+            on_change=_store_model_value,
+            args=("starting_percent", "battery"),
+        )
+        reserve_percent = st.sidebar.number_input(
+            "Minimum reserve (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=_model_value("reserve_percent", 10.0),
+            step=1.0,
+            key=_model_widget_key("reserve_percent"),
+            on_change=_store_model_value,
+            args=("reserve_percent", "battery"),
+        )
     battery_settings = st.sidebar.radio(
         "Battery settings",
         ["Custom values", "Battery preset"],
@@ -992,8 +1028,9 @@ def render_model(hourly: pd.DataFrame) -> None:
     config = SimulationConfig(
         solar_scale=solar_scale,
         battery=battery,
-        strategy="self_consumption" if strategy_label == "Self-consumption" else "tou_reserve",
+        strategy=BATTERY_STRATEGY_VALUES[strategy_label],
         monthly_solar_scales=monthly_solar_scales,
+        export_rate_per_kwh=export_rate,
     )
     try:
         result = simulate(selected, config, rules)

@@ -678,6 +678,58 @@ def test_charge_and_reserve_controls_are_grouped_with_battery_strategy():
     ]
 
 
+def test_battery_strategy_selector_exposes_the_four_supported_strategies():
+    app = _new_app()
+    app.radio[0].set_value("System model").run()
+
+    strategy = _selectbox(app, "Battery strategy")
+
+    assert strategy.options == [
+        "Self-consumption",
+        "Fixed TOU reserve",
+        "Cost optimized (historical foresight)",
+        "Full backup",
+    ]
+
+
+def test_full_backup_displays_fixed_charge_and_restores_editable_values():
+    app = _new_app()
+    app.radio[0].set_value("System model").run()
+    _number_input(app, "Starting charge (%)").set_value(80.0).run()
+    _number_input(app, "Minimum reserve (%)").set_value(25.0).run()
+
+    _selectbox(app, "Battery strategy").set_value("Full backup").run()
+
+    full_start = _number_input(app, "Starting charge (%)")
+    full_reserve = _number_input(app, "Minimum reserve (%)")
+    assert full_start.value == 100.0
+    assert full_start.disabled
+    assert full_reserve.value == 100.0
+    assert full_reserve.disabled
+
+    _selectbox(app, "Battery strategy").set_value("Self-consumption").run()
+
+    assert _number_input(app, "Starting charge (%)").value == 80.0
+    assert not _number_input(app, "Starting charge (%)").disabled
+    assert _number_input(app, "Minimum reserve (%)").value == 25.0
+    assert not _number_input(app, "Minimum reserve (%)").disabled
+
+
+def test_historical_foresight_strategy_explains_its_scope_and_runs():
+    app = _new_app()
+    app.radio[0].set_value("System model").run()
+
+    _selectbox(app, "Battery strategy").set_value(
+        "Cost optimized (historical foresight)"
+    ).run()
+
+    captions = [caption.value for caption in app.caption]
+    assert any("recorded future" in value for value in captions)
+    assert any("battery degradation" in value for value in captions)
+    assert not app.exception
+    assert not any("Model settings are invalid" in error.value for error in app.error)
+
+
 def test_battery_preset_selection_survives_a_history_round_trip():
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=30).run()
 
@@ -1068,7 +1120,7 @@ def test_export_rates_persist_across_fresh_sessions(isolate_user_configuration):
 def test_all_battery_settings_persist_across_fresh_sessions():
     first = _new_app()
     first.radio[0].set_value("System model").run()
-    _selectbox(first, "Battery strategy").set_value("TOU reserve").run()
+    _selectbox(first, "Battery strategy").set_value("Fixed TOU reserve").run()
     _number_input(first, "Starting charge (%)").set_value(80.0).run()
     _number_input(first, "Minimum reserve (%)").set_value(25.0).run()
     _number_input(first, "Battery usable capacity (kWh)").set_value(18.0).run()
@@ -1081,7 +1133,7 @@ def test_all_battery_settings_persist_across_fresh_sessions():
 
     second = _new_app()
     second.radio[0].set_value("System model").run()
-    assert _selectbox(second, "Battery strategy").value == "TOU reserve"
+    assert _selectbox(second, "Battery strategy").value == "Fixed TOU reserve"
     assert _number_input(second, "Starting charge (%)").value == 80.0
     assert _number_input(second, "Minimum reserve (%)").value == 25.0
     assert _radio(second, "Battery settings").value == "Battery preset"
