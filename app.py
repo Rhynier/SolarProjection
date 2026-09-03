@@ -1,3 +1,4 @@
+import os
 from copy import deepcopy
 from datetime import date
 from math import isfinite
@@ -44,8 +45,14 @@ from solar_model.tou import (
 
 
 ROOT = Path(__file__).parent
-UTILITY_PATH = ROOT / "combined-electric-usage.csv"
-SOLAR_PATH = ROOT / "combined-monthly-energy.csv"
+UTILITY_PATH = Path(
+    os.environ.get("HOME_ENERGY_MODEL_UTILITY_CSV")
+    or ROOT / "combined-electric-usage.csv"
+)
+SOLAR_PATH = Path(
+    os.environ.get("HOME_ENERGY_MODEL_SOLAR_CSV")
+    or ROOT / "combined-monthly-energy.csv"
+)
 HISTORY_SERIES = ["Used", "Production", "Grid export"]
 TOU_COLUMNS = [
     "Name",

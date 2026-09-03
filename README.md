@@ -47,6 +47,12 @@ Keep these uncommitted files in the project root:
 - `combined-monthly-energy.csv`, with `Date/Time` and
   `Energy Produced (Wh)`.
 
+Set `HOME_ENERGY_MODEL_UTILITY_CSV` and/or `HOME_ENERGY_MODEL_SOLAR_CSV` to read
+either input from an alternate path. The automated tests use these overrides to
+point the app at a committed, deterministic synthetic dataset
+(`tests/sample_data.py`), so `python -m pytest` passes without the personal CSVs;
+the one test that validates the real exports is skipped when they are absent.
+
 The app aligns matching utility and solar hours. Its estimated household load
 is `grid import + actual solar production - grid export` (all in kWh).
 

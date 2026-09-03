@@ -1,0 +1,17 @@
+{
+  "name": "Home Energy Model",
+  "install": "sudo apt-get update && sudo apt-get install -y python3.12-venv && python3 -m venv .venv && .venv/bin/python -m pip install -e \".[dev]\"",
+  "terminals": [
+    {
+      "name": "Streamlit",
+      "command": ".venv/bin/python -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true",
+      "description": "Serves the Streamlit prototype on port 8501. Requires the two local CSV inputs; without them the app shows a data-load error."
+    }
+  ],
+  "ports": [
+    {
+      "name": "Streamlit",
+      "port": 8501
+    }
+  ]
+}

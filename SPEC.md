@@ -73,10 +73,18 @@ The following files must exist beside `app.py`:
 - `combined-electric-usage.csv`
 - `combined-monthly-energy.csv`
 
-The filenames are fixed. Replacing either file with a newer export of the same
-schema and restarting the application reloads the data. There is no upload UI.
+The default filenames are fixed. Replacing either file with a newer export of
+the same schema and restarting the application reloads the data. There is no
+upload UI.
 
-The CSV files are local data and must remain uncommitted.
+The `HOME_ENERGY_MODEL_UTILITY_CSV` and `HOME_ENERGY_MODEL_SOLAR_CSV`
+environment variables may each provide a complete alternate path to the
+corresponding input file, mirroring the configuration-path override. When unset,
+the application reads the two default files beside `app.py`. The automated tests
+use these overrides to point the application at a committed deterministic sample
+dataset so the suite runs without the personal exports.
+
+The personal CSV files are local data and must remain uncommitted.
 
 ## 5. Input Data Contract
 
@@ -667,7 +675,9 @@ Automated tests cover:
 - Source schemas, numeric validation, normalization, and household-load
   derivation.
 - Daylight-saving fall-back and spring-forward behavior.
-- Real supplied CSV loading.
+- Deterministic sample-dataset loading via the CSV path overrides. Real supplied
+  CSV loading is verified only when the personal files are present and is skipped
+  otherwise.
 - Auto and manual historical and modeled-chart aggregation.
 - TOU price parsing, seasonal ranking, overlap precedence, all-day rules,
   overnight rules, and year-wrapping seasons.
