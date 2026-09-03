@@ -43,6 +43,25 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pytest -v
 ```
 
+## Cursor Cloud specific instructions
+
+The Cloud Agent environment is defined by `.cursor/environment.json`. It installs
+`python3.12-venv`, creates a `.venv`, and installs the project with dev
+dependencies; the `Streamlit` terminal serves the app on port `8501`. On Linux
+use the venv directly:
+
+```bash
+.venv/bin/python -m pytest -v
+.venv/bin/python -m streamlit run app.py
+```
+
+The two CSV inputs (`combined-electric-usage.csv`, `combined-monthly-energy.csv`)
+are personal, `.gitignore`d, and never present in a fresh checkout. Without them
+the app shows a data-load error and the data-dependent tests fail while the rest
+(106 of 163) still pass. To exercise the full app or suite in a fresh
+environment, supply real exports or a synthetic dataset in the documented CSV
+formats (hourly, non-negative, with matching utility and solar local hours).
+
 ## Working rules
 
 - Preserve the two local CSV inputs and never commit them:
