@@ -144,13 +144,29 @@ Date/Time,Energy Produced (Wh)
         load_hourly_energy(utility, solar)
 
 
-def test_supplied_csvs_form_a_clean_hourly_dataset():
-    root = Path(__file__).parents[1]
-    result = load_hourly_energy(
-        root / "combined-electric-usage.csv",
-        root / "combined-monthly-energy.csv",
-    )
+def test_sample_dataset_forms_a_clean_hourly_dataset(sample_energy_csvs):
+    utility_path, solar_path = sample_energy_csvs
+    result = load_hourly_energy(utility_path, solar_path)
     assert len(result) == 8783
+    assert result.loc[0, "timestamp"] == pd.Timestamp("2025-08-17 00:00")
+    assert result["timestamp"].is_monotonic_increasing
+    assert not result.isna().any().any()
+    assert (result[[
+        "grid_import_kwh", "grid_export_kwh", "actual_solar_kwh",
+        "household_load_kwh",
+    ]] >= 0).all().all()
+
+
+_REAL_UTILITY_CSV = Path(__file__).parents[1] / "combined-electric-usage.csv"
+_REAL_SOLAR_CSV = Path(__file__).parents[1] / "combined-monthly-energy.csv"
+
+
+@pytest.mark.skipif(
+    not (_REAL_UTILITY_CSV.exists() and _REAL_SOLAR_CSV.exists()),
+    reason="personal CSV inputs are not present in this checkout",
+)
+def test_supplied_csvs_form_a_clean_hourly_dataset():
+    result = load_hourly_energy(_REAL_UTILITY_CSV, _REAL_SOLAR_CSV)
     assert result["timestamp"].is_monotonic_increasing
     assert not result.isna().any().any()
     assert (result[[

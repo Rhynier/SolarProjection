@@ -56,11 +56,13 @@ use the venv directly:
 ```
 
 The two CSV inputs (`combined-electric-usage.csv`, `combined-monthly-energy.csv`)
-are personal, `.gitignore`d, and never present in a fresh checkout. Without them
-the app shows a data-load error and the data-dependent tests fail while the rest
-(106 of 163) still pass. To exercise the full app or suite in a fresh
-environment, supply real exports or a synthetic dataset in the documented CSV
-formats (hourly, non-negative, with matching utility and solar local hours).
+are personal, `.gitignore`d, and never present in a fresh checkout. The test
+suite is independent of them: `tests/conftest.py` points the app at a committed
+deterministic sample dataset (`tests/sample_data.py`) via the
+`HOME_ENERGY_MODEL_UTILITY_CSV` / `HOME_ENERGY_MODEL_SOLAR_CSV` overrides, so the
+full suite passes without the personal files (the single real-export test skips
+when they are absent). The interactive app still shows a data-load error until
+you supply the real exports beside `app.py`.
 
 ## Working rules
 
