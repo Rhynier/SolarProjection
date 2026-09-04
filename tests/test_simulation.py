@@ -60,6 +60,24 @@ def test_tou_reserve_preserves_charge_until_the_seasonal_maximum_rate():
     assert list(result["is_expensive"]) == [False, True]
 
 
+def test_full_backup_holds_full_capacity_and_does_not_discharge_on_grid():
+    result = simulate(
+        frame([3.0, 2.0], [0.0, 4.0]),
+        SimulationConfig(
+            1.0,
+            battery(starting_percent=20.0, reserve_percent=80.0),
+            "full_backup",
+        ),
+        [],
+    )
+
+    assert list(result["battery_soc_kwh"]) == pytest.approx([10.0, 10.0])
+    assert list(result["battery_discharge_output_kwh"]) == pytest.approx([0.0, 0.0])
+    assert list(result["battery_charge_input_kwh"]) == pytest.approx([0.0, 0.0])
+    assert list(result["grid_import_kwh"]) == pytest.approx([3.0, 0.0])
+    assert list(result["grid_export_kwh"]) == pytest.approx([0.0, 2.0])
+
+
 def test_tou_reserve_accepts_an_overlapping_seasonal_price_override():
     rules = parse_tou_rules([
         {

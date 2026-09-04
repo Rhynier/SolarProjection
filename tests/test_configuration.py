@@ -49,6 +49,33 @@ def test_validate_configuration_returns_a_normalized_copy():
 
 
 @pytest.mark.parametrize(
+    "strategy",
+    [
+        "Self-consumption",
+        "Fixed TOU reserve",
+        "Cost optimized (historical foresight)",
+        "Full backup",
+    ],
+)
+def test_validate_configuration_accepts_battery_strategy_labels(strategy):
+    document = default_configuration()
+    document["battery"]["strategy"] = strategy
+
+    normalized = validate_configuration(document)
+
+    assert normalized["battery"]["strategy"] == strategy
+
+
+def test_validate_configuration_normalizes_legacy_tou_reserve_label():
+    document = default_configuration()
+    document["battery"]["strategy"] = "TOU reserve"
+
+    normalized = validate_configuration(document)
+
+    assert normalized["battery"]["strategy"] == "Fixed TOU reserve"
+
+
+@pytest.mark.parametrize(
     ("mutate", "message"),
     [
         (lambda value: value.update({"extra": True}), "unknown field 'extra'"),

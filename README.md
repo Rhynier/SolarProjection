@@ -70,15 +70,33 @@ read-only monthly totals. Annual and monthly settings remain independent when
 switching modes. Monthly reference and proposed values are required; invalid
 values stop simulation with a month-specific error. The historical
 household-load curve stays fixed. The battery charges from solar surplus only,
-never from the grid. Both self-consumption and TOU-reserve strategies obey
-usable capacity, reserve, starting charge, AC-side charge and discharge limits,
-and symmetric per-leg efficiency derived from the configured round-trip
-efficiency. Starting charge and minimum reserve appear directly beneath Battery
-strategy; efficiency and charge/discharge power remain in Advanced battery
-settings. The Configuration view's shared TOU editor starts with SMUD's
-published 2026 rates, without holiday exceptions. TOU reserve derives Cheap,
-Less Expensive, and Expensive tiers from each season's configured prices and
-discharges only at the seasonal maximum.
+never from the grid or for battery-to-grid export. All strategies obey usable
+capacity, AC-side charge and discharge limits, and symmetric per-leg efficiency
+derived from the configured round-trip efficiency. Starting charge and minimum
+reserve appear directly beneath Battery strategy; efficiency and
+charge/discharge power remain in Advanced battery settings. The available
+strategies are:
+
+- **Self-consumption:** charges from excess solar and discharges whenever solar
+  cannot cover household load.
+- **Fixed TOU reserve:** follows the same solar-only charging rule but discharges
+  only during the configured season's highest-price hours. It is a deterministic
+  simulator rule, not a reproduction of Enphase's proprietary Savings behavior.
+- **Cost optimized (historical foresight):** finds the lowest modeled energy cost
+  over the selected recorded period using the configured hourly import and export
+  prices. It knows the whole selected history, excludes battery degradation, and
+  is a benchmark rather than a production forecast or Enphase control algorithm.
+- **Full backup:** holds the battery at an effective 100% reserve and does not
+  discharge during the on-grid replay. Outage detection and outage replay are not
+  modeled.
+
+The Configuration view's shared TOU editor starts with SMUD's published 2026
+rates, without holiday exceptions. Fixed TOU reserve derives Cheap, Less
+Expensive, and Expensive tiers from each season's configured prices and
+discharges only at the seasonal maximum. The System model view reports solar
+self-consumption, expensive-period grid import, battery discharge, equivalent
+cycles across the usable capacity window, and ending charge so strategies can be
+compared on more than projected cost alone.
 
 The Historical and System model views share one period and one aggregation
 setting. Choose all available data, a seven-day range beginning on a selected

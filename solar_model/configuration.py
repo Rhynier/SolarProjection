@@ -174,6 +174,23 @@ def _require_choice(value: object, path: str, choices: set[str]) -> str:
     return normalized
 
 
+def _normalize_battery_strategy(value: object) -> str:
+    strategy = _require_choice(
+        value,
+        "battery.strategy",
+        {
+            "Self-consumption",
+            "TOU reserve",
+            "Fixed TOU reserve",
+            "Cost optimized (historical foresight)",
+            "Full backup",
+        },
+    )
+    if strategy == "TOU reserve":
+        return "Fixed TOU reserve"
+    return strategy
+
+
 def _display_tou_row(row: dict[str, Any], row_number: int) -> dict[str, object]:
     semantic = _require_object(row, f"time_of_use.rules[{row_number}]", _TOU_SEMANTIC_FIELDS)
     return {
@@ -310,9 +327,7 @@ def validate_configuration(document: object) -> dict[str, Any]:
             )
         },
         "battery": {
-            "strategy": _require_choice(
-                battery["strategy"], "battery.strategy", {"Self-consumption", "TOU reserve"}
-            ),
+            "strategy": _normalize_battery_strategy(battery["strategy"]),
             "settings_mode": _require_choice(
                 battery["settings_mode"], "battery.settings_mode", {"Custom values", "Battery preset"}
             ),
